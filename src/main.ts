@@ -1,5 +1,5 @@
 import { createApp } from 'vue'
-import { createRouter, createWebHistory } from 'vue-router'
+import { createRouter, createWebHashHistory } from 'vue-router'
 import ElementPlus from 'element-plus'
 import 'element-plus/dist/index.css'
 import 'element-plus/theme-chalk/dark/css-vars.css'
@@ -16,7 +16,7 @@ import DashboardPage from './pages/Dashboard.vue'
 
 // 创建路由
 const routes = [
-  { path: '/', redirect: '/dashboard' },
+  { path: '/', redirect: '/schedule' },
   { path: '/schedule', component: SchedulePage, name: '排班管理' },
   // { path: '/people', component: PeoplePage, name: '人员管理' },
   // { path: '/shifts', component: ShiftsPage, name: '班次管理' },
@@ -26,7 +26,7 @@ const routes = [
 ]
 
 const router = createRouter({
-  history: createWebHistory(),
+  history: createWebHashHistory(),
   routes
 })
 
