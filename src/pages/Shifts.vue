@@ -4,8 +4,7 @@
       <template #header>
         <div class="card-header">
           <span>班次管理</span>
-          <el-button type="primary" @click="showAddDialog = true">
-            <el-icon><Plus /></el-icon>
+          <el-button type="primary" @click="showAddDialog = true" :icon="Plus">
             新增班次
           </el-button>
         </div>
@@ -13,7 +12,6 @@
 
       <!-- 班次列表（支持拖拽排序） -->
       <div class="shift-section">
-        <h3>班次列表</h3>
         <el-table
           :data="shifts"
           style="width: 100%"
@@ -45,14 +43,12 @@
               </div>
             </template>
           </el-table-column>
-          <el-table-column label="操作" width="160">
+          <el-table-column label="操作" width="180">
             <template #default="{ row }">
-              <el-button type="primary" size="small" @click="handleEdit(row)">
-                <el-icon><Edit /></el-icon>
+              <el-button type="primary" size="small" @click="handleEdit(row)" :icon="Edit">
                 编辑
               </el-button>
-              <el-button type="danger" size="small" @click="handleDelete(row)">
-                <el-icon><Delete /></el-icon>
+              <el-button type="danger" size="small" @click="handleDelete(row)" :icon="Delete">
                 删除
               </el-button>
             </template>
@@ -293,7 +289,13 @@ const handleRowDrop = async (targetId: string) => {
       id: s.id,
       data: { order: idx + 1 },
     }));
-    await repositories.shifts.batchUpdate(updates);
+    if (repositories.shifts.batchUpdate) {
+      await repositories.shifts.batchUpdate(updates);
+    } else {
+      for (const u of updates) {
+        await repositories.shifts.update(u.id, u.data);
+      }
+    }
     shifts.value = await repositories.shifts.getAll();
   } catch (error) {
     console.error("[shift-reorder-error]", {
@@ -316,6 +318,7 @@ const handleRowDrop = async (targetId: string) => {
 
   .el-card {
     height: 100%;
+    background: var(--el-bg-color);
   }
 
   .card-header {
@@ -329,7 +332,7 @@ const handleRowDrop = async (targetId: string) => {
 
     h3 {
       margin-bottom: 15px;
-      color: #303133;
+      color: var(--el-text-color-primary);
     }
   }
 

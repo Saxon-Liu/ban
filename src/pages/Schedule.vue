@@ -96,9 +96,10 @@
                     :key="personId"
                   >
                     <el-tag
-                      size="small"
+                      size="large"
                       class="schedule-tag"
                       closable
+                      disable-transitions
                     >
                       <span>
                         {{ getPersonName(personId) }}
@@ -124,10 +125,13 @@
                       :key="personId"
                     >
                       <el-tag
-                        size="small"
+                        size="large"
                         class="schedule-tag"
                         closable
+                        disable-transitions
                         @close="removeSchedule(personId, row.date, shift.id)"
+                        :draggable="true"
+                        @dragstart="handleScheduleDragStart($event, personId, row.date, shift.id)"
                         :style="{
                           backgroundColor: getPersonColor(personId),
                           color: getAdaptiveTextColor(getPersonColor(personId)),
@@ -232,7 +236,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { Download, Close } from "@element-plus/icons-vue";
+import { Download } from "@element-plus/icons-vue";
 import type {
   Person,
   PersonWithStatistics,
@@ -254,6 +258,7 @@ const loading = ref(false);
 const showScheduleDetail = ref(false);
 const selectedDate = ref("");
 const selectedShiftId = ref("");
+const extraRestDaysForCurrentMonth = ref(0);
 
 // 计算属性
 const peopleWithStats = computed(() => {
@@ -286,6 +291,23 @@ const loadData = async () => {
     people.value = peopleData;
     shifts.value = shiftsData;
     schedules.value = schedulesData;
+
+    try {
+      const [year, monthNum] = currentMonth.value.split("-").map(Number);
+      const config = await repositories.extraRestConfigs.getByYearAndMonth(
+        year,
+        monthNum
+      );
+      extraRestDaysForCurrentMonth.value = config?.extraRestDays || 0;
+    } catch (error: any) {
+      console.error("[extraRest-load-error]", {
+        time: new Date().toISOString(),
+        params: { month: currentMonth.value },
+        message: error?.message,
+        stack: error?.stack,
+      });
+      extraRestDaysForCurrentMonth.value = 0;
+    }
   } catch (error) {
     console.error("加载数据失败:", error);
     ElMessage.error("加载数据失败");
@@ -311,13 +333,14 @@ const calculatePersonStatistics = (personId: string, month: string) => {
   );
 
   const scheduledRestDays = monthSchedules.length;
-  const remainingRestDays = person.baseRestDays - scheduledRestDays;
+  const totalRestDays = person.baseRestDays + extraRestDaysForCurrentMonth.value;
+  const remainingRestDays = totalRestDays - scheduledRestDays;
 
   return {
     personId,
     month,
     baseRestDays: person.baseRestDays,
-    extraRestDays: 0,
+    extraRestDays: extraRestDaysForCurrentMonth.value,
     scheduledRestDays,
     remainingRestDays,
     isOverRest: remainingRestDays < 0,
@@ -349,27 +372,6 @@ const handlePersonDragStart = (
   event.dataTransfer.effectAllowed = "move";
 };
 
-/**
- * 处理排班拖拽开始
- */
-const handleScheduleDragStart = (
-  event: DragEvent,
-  personId: string,
-  date: string,
-  shiftId: string
-) => {
-  if (!event.dataTransfer) return;
-
-  const dragData: DragData = {
-    type: "schedule",
-    personId,
-    sourceDate: date,
-    sourceShiftId: shiftId,
-  };
-
-  event.dataTransfer.setData("text/plain", JSON.stringify(dragData));
-  event.dataTransfer.effectAllowed = "move";
-};
 
 /**
  * 处理单元格放置
@@ -386,33 +388,49 @@ const handleCellDrop = async (
     const dragDataStr = event.dataTransfer.getData("text/plain");
     const dragData: DragData = JSON.parse(dragDataStr);
 
-    // 检查是否为排班拖拽（移动排班）
     if (
       dragData.type === "schedule" &&
       dragData.sourceDate &&
       dragData.sourceShiftId
     ) {
-      // 删除原排班记录
+      const isSameCell =
+        dragData.sourceDate === date && dragData.sourceShiftId === shiftId;
+      if (isSameCell) {
+        return;
+      }
+
+      const movingSameDay = dragData.sourceDate === date;
+      if (!movingSameDay) {
+        const existingScheduleForTargetDay = schedules.value.find(
+          (s) => s.personId === dragData.personId && s.date === date
+        );
+        if (existingScheduleForTargetDay) {
+          ElMessage.warning("该员工当天已有排班，请先删除原有排班");
+          return;
+        }
+      }
+
       const sourceSchedule = schedules.value.find(
         (s) =>
           s.personId === dragData.personId &&
           s.date === dragData.sourceDate &&
           s.shiftId === dragData.sourceShiftId
       );
-
       if (sourceSchedule) {
         await repositories.schedules.delete(sourceSchedule.id);
+        schedules.value = schedules.value.filter((s) => s.id !== sourceSchedule.id);
       }
     }
 
-    // 检查当天是否已有排班
-    const existingSchedule = schedules.value.find(
-      (s) => s.personId === dragData.personId && s.date === date
-    );
-
-    if (existingSchedule) {
-      ElMessage.warning("该员工当天已有排班，请先删除原有排班");
-      return;
+    // 从人员列表拖拽时，检查当天是否已有排班
+    if (dragData.type === "person") {
+      const existingSchedule = schedules.value.find(
+        (s) => s.personId === dragData.personId && s.date === date
+      );
+      if (existingSchedule) {
+        ElMessage.warning("该员工当天已有排班，请先删除原有排班");
+        return;
+      }
     }
 
     // 检查是否为休息班次
@@ -450,6 +468,32 @@ const handleCellDrop = async (
   } catch (error) {
     console.error("排班失败:", error);
     ElMessage.error("排班失败");
+  }
+};
+
+const handleScheduleDragStart = (
+  event: DragEvent,
+  personId: string,
+  sourceDate: string,
+  sourceShiftId: string
+) => {
+  try {
+    if (!event.dataTransfer) return;
+    const dragData: DragData = {
+      type: "schedule",
+      personId,
+      sourceDate,
+      sourceShiftId,
+    } as DragData;
+    event.dataTransfer.setData("text/plain", JSON.stringify(dragData));
+    event.dataTransfer.effectAllowed = "move";
+  } catch (error: any) {
+    console.error("[schedule-dragstart-error]", {
+      time: new Date().toISOString(),
+      params: { personId, sourceDate, sourceShiftId },
+      message: error?.message,
+      stack: error?.stack,
+    });
   }
 };
 
@@ -592,14 +636,14 @@ onMounted(() => {
 
   .people-sidebar {
     width: 150px;
-    background: #fff;
+    background: var(--el-bg-color);
     border-radius: 8px;
     padding: 20px;
     box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
 
     h3 {
       margin: 0 0 15px 0;
-      color: #303133;
+      color: var(--el-text-color-primary);
     }
 
     .people-list {
@@ -613,14 +657,16 @@ onMounted(() => {
         padding: 10px;
         margin-right: 10px;
         margin-bottom: 10px;
-        background: #f5f7fa;
+        background: var(--el-fill-color-light);
+        border: 1px solid var(--el-border-color);
         border-radius: 6px;
         cursor: move;
         transition: all 0.3s;
 
         &:hover {
-          background: #e6e8eb;
-          transform: translateY(-1px);
+          background: var(--el-color-primary-light-9);
+          border-color: var(--el-color-primary);
+          // transform: translateY(-1px);
         }
       }
     }
@@ -642,23 +688,23 @@ onMounted(() => {
   .person-name {
     font-size: 14px;
     font-weight: 500;
-    color: #303133;
+    color: var(--el-text-color-primary);
   }
 
   .person-rest-days {
     font-size: 12px;
-    color: #67c23a;
+    color: var(--el-color-success);
     margin-top: 2px;
 
     &.over-rest {
-      color: #f56c6c;
+      color: var(--el-color-error);
       font-weight: bold;
     }
   }
 
   .schedule-table-container {
     flex: 1;
-    background: #fff;
+    background: var(--el-bg-color);
     border-radius: 8px;
     padding: 20px;
     box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
@@ -679,12 +725,12 @@ onMounted(() => {
   .date {
     font-size: 14px;
     font-weight: 500;
-    color: #303133;
+    color: var(--el-text-color-primary);
   }
 
   .weekday {
     font-size: 12px;
-    color: #909399;
+    color: var(--el-text-color-secondary);
     margin-top: 2px;
   }
 
@@ -698,18 +744,18 @@ onMounted(() => {
     padding: 5px;
     border: 1px dashed #dcdfe6;
     border-radius: 4px;
-    background: #fafafa;
+    background: var(--el-fill-color-light);
     cursor: pointer;
     transition: all 0.3s;
 
     &:hover {
-      border-color: #409eff;
-      background: #f0f9ff;
+      border-color: var(--el-color-primary);
+      background: var(--el-color-primary-light-9);
     }
 
     &.drag-over {
-      border-color: #67c23a;
-      background: #f0f9ff;
+      border-color: var(--el-color-success);
+      background: var(--el-color-success-light-9);
     }
   }
 
@@ -718,7 +764,7 @@ onMounted(() => {
     align-items: center;
     padding: 4px 6px;
     margin-bottom: 4px;
-    background: #fff;
+    background: var(--el-fill-color-blank);
     border-radius: 4px;
     border: 1px solid #e4e7ed;
     cursor: move;
@@ -734,7 +780,7 @@ onMounted(() => {
   .person-name-small {
     flex: 1;
     font-size: 12px;
-    color: #606266;
+    color: var(--el-text-color-regular);
   }
 
   .schedule-detail {
@@ -749,14 +795,14 @@ onMounted(() => {
       align-items: center;
       padding: 10px;
       margin-bottom: 10px;
-      background: #f5f7fa;
+      background: var(--el-fill-color-light);
       border-radius: 6px;
     }
   }
 
   .no-schedule {
     text-align: center;
-    color: #909399;
+    color: var(--el-text-color-secondary);
     padding: 20px;
   }
   :deep(.el-table) {
