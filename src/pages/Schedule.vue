@@ -77,7 +77,12 @@
               <template #default="{ row }">
                 <div class="date-cell">
                   <div class="date">{{ formatDate(row.date, "MM-DD") }}</div>
-                  <div class="weekday">{{ row.weekdayName }}</div>
+                  <div
+                    class="weekday"
+                    :class="{ 'is-weekend': row.weekdayName === '周六' || row.weekdayName === '周日' }"
+                  >
+                    {{ row.weekdayName }}
+                  </div>
                 </div>
               </template>
             </el-table-column>
@@ -720,6 +725,10 @@ onMounted(() => {
 
   .date-cell {
     text-align: center;
+  }
+  .weekday.is-weekend {
+    color: var(--el-color-warning);
+    font-weight: 600;
   }
 
   .date {

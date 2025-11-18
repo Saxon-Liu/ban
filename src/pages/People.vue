@@ -145,7 +145,6 @@ import { Plus, Edit, Delete, Upload, Download } from "@element-plus/icons-vue";
 import type { Person, PersonWithStatistics } from "@/types";
 import { repositories } from "@/repositories";
 import { getCurrentMonth } from "@/utils";
-import { Workbook } from "exceljs";
 import { excelExportService } from "@/services";
 
 // 响应式数据
@@ -319,6 +318,7 @@ const handleExportPeople = async () => {
     if (list.length > 0) {
       fileName= '人员列表'
     }
+    const { Workbook } = await import("exceljs");
     const workbook = new Workbook();
     const sheet = workbook.addWorksheet(fileName);
     sheet.addRow(["姓名", "颜色", "基础月休天数"]);
@@ -363,6 +363,7 @@ const handleImportFileChange = async (e: Event) => {
   if (!file) return;
   try {
     const buffer = await file.arrayBuffer();
+    const { Workbook } = await import("exceljs");
     const workbook = new Workbook();
     await workbook.xlsx.load(buffer);
     const sheet = workbook.worksheets[0];
