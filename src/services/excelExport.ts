@@ -3,7 +3,7 @@
  * 提供排班数据导出为Excel文件的功能
  */
 
-import { Workbook } from 'exceljs'
+import type { Worksheet } from 'exceljs'
 import type { Shift, Person, Schedule } from '@/types'
 import { formatDate, getMonthDates } from '@/utils'
 
@@ -39,6 +39,7 @@ export class ExcelExportService {
   ): Promise<Blob> {
     try {
       const exportData = this.prepareExportData(yearMonth, shifts, people, schedules)
+      const { Workbook } = await import('exceljs')
       const workbook = new Workbook()
       const worksheet = workbook.addWorksheet(`${yearMonth}排班表`)
       this.fillWorksheetWithExcelJS(worksheet, exportData, shifts)
@@ -95,7 +96,7 @@ export class ExcelExportService {
    * 创建工作表
    */
   private fillWorksheetWithExcelJS(
-    worksheet: import('exceljs').Worksheet,
+    worksheet: Worksheet,
     exportData: MonthlyExportData[],
     shifts: Shift[]
   ): void {

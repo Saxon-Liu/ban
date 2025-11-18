@@ -1,13 +1,10 @@
 <template>
   <div id="app">
     <el-container>
-      <el-aside width="200px">
+      <el-aside width="200px" class="app-aside">
         <el-menu
           :default-active="$route.path"
           router
-          background-color="#545c64"
-          text-color="#fff"
-          active-text-color="#ffd04b"
         >
           <el-menu-item index="/schedule">
             <el-icon>
@@ -35,6 +32,13 @@
             <span>额外休息配置</span>
           </el-menu-item> -->
         </el-menu>
+        <div class="theme-switcher">
+          <el-select v-model="themeMode" size="small" style="width: 160px">
+            <el-option label="跟随系统" value="system" />
+            <el-option label="亮色" value="light" />
+            <el-option label="暗色" value="dark" />
+          </el-select>
+        </div>
       </el-aside>
       <el-main>
         <router-view />
@@ -44,7 +48,37 @@
 </template>
 
 <script setup lang="ts">
-// import { Calendar, Setting } from "@element-plus/icons-vue";
+import { ref, onMounted, watch } from 'vue'
+import { Calendar, Tools } from '@element-plus/icons-vue'
+
+const THEME_KEY = 'theme-mode'
+const themeMode = ref<'system' | 'light' | 'dark'>('system')
+
+const isSystemDark = () => window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
+const applyTheme = () => {
+  const mode = themeMode.value
+  const dark = mode === 'system' ? isSystemDark() : mode === 'dark'
+  const root = document.documentElement
+  if (dark) {
+    root.classList.add('dark')
+  } else {
+    root.classList.remove('dark')
+  }
+}
+
+onMounted(() => {
+  const saved = localStorage.getItem(THEME_KEY) as 'system' | 'light' | 'dark' | null
+  themeMode.value = saved || 'system'
+  applyTheme()
+  const media = window.matchMedia('(prefers-color-scheme: dark)')
+  const handler = () => themeMode.value === 'system' && applyTheme()
+  media.addEventListener('change', handler)
+})
+
+watch(themeMode, (val) => {
+  localStorage.setItem(THEME_KEY, val)
+  applyTheme()
+})
 </script>
 
 <style>
@@ -66,12 +100,18 @@ body {
   height: 100vh;
 }
 
-.el-aside {
-  background-color: #545c64;
+.app-aside {
+  position: relative;
 }
 
 .el-main {
-  background-color: #f5f7fa;
+  background-color: var(--el-bg-color-page);
   padding: 20px;
+}
+
+.theme-switcher {
+  position: absolute;
+  left: 10px;
+  bottom: 10px;
 }
 </style>

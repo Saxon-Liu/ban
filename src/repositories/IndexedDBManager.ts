@@ -3,51 +3,10 @@
  * 负责数据库的初始化和连接管理
  */
 
-import { openDB, IDBPDatabase, DBSchema } from "idb";
-import type { Person, Shift, Schedule, ExtraRestConfig } from "@/types";
+import { openDB, IDBPDatabase } from "idb";
 
-/**
- * 数据库模式定义
- */
-interface ScheduleDBSchema extends DBSchema {
-  people: {
-    key: string;
-    value: Person;
-    indexes: {
-      "by-name": string;
-      "by-color": string;
-    };
-  };
-  shifts: {
-    key: string;
-    value: Shift;
-    indexes: {
-      "by-name": string;
-      "by-isRest": boolean;
-      "by-order": number;
-    };
-  };
-  schedules: {
-    key: string;
-    value: Schedule;
-    indexes: {
-      "by-personId": string;
-      "by-shiftId": string;
-      "by-date": string;
-      "by-month": string;
-      "by-personId-date": [string, string];
-    };
-  };
-  extraRestConfigs: {
-    key: string;
-    value: ExtraRestConfig;
-    indexes: {
-      "by-year": number;
-      "by-month": number;
-      "by-year-month": [number, number];
-    };
-  };
-}
+// 为避免与 idb v8 的 DBSchema 类型定义不兼容导致的构建错误，
+// 这里不对数据库实例应用泛型 Schema，保持运行时行为不变。
 
 /**
  * 数据库配置常量
@@ -64,13 +23,13 @@ const DB_CONFIG = {
  * 提供数据库连接和基础操作方法
  */
 export class IndexedDBManager {
-  private db: IDBPDatabase<ScheduleDBSchema> | null = null;
+  private db: IDBPDatabase | null = null;
 
   /**
    * 获取数据库实例
    * 如果数据库未连接，则先进行连接
    */
-  async getDB(): Promise<IDBPDatabase<ScheduleDBSchema>> {
+  async getDB(): Promise<IDBPDatabase> {
     if (!this.db) {
       this.db = await this.connect();
     }
@@ -81,18 +40,22 @@ export class IndexedDBManager {
    * 连接数据库
    * 创建对象存储和索引
    */
-  private async connect(): Promise<IDBPDatabase<ScheduleDBSchema>> {
-    return openDB<ScheduleDBSchema>(DB_CONFIG.NAME, DB_CONFIG.VERSION, {
+  private async connect(): Promise<IDBPDatabase> {
+    return openDB(DB_CONFIG.NAME, DB_CONFIG.VERSION, {
       upgrade(db, oldVersion) {
         // 版本2：推倒重来，删除旧对象存储
         if (oldVersion < 2) {
-          ["people", "shifts", "schedules", "extraRestConfigs"].forEach(
-            (name) => {
-              if (db.objectStoreNames.contains(name)) {
-                db.deleteObjectStore(name);
-              }
+          const STORE_NAMES = [
+            "people",
+            "shifts",
+            "schedules",
+            "extraRestConfigs",
+          ] as const;
+          STORE_NAMES.forEach((name) => {
+            if (db.objectStoreNames.contains(name)) {
+              db.deleteObjectStore(name);
             }
-          );
+          });
         }
 
         // 人员表

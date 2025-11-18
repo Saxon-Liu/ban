@@ -154,6 +154,7 @@ onMounted(() => {
 
   .el-card {
     height: 100%;
+    background: var(--el-bg-color);
   }
 
   .card-header {

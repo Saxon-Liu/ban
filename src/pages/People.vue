@@ -4,18 +4,25 @@
       <template #header>
         <div class="card-header">
           <span>人员管理</span>
-          <el-button
-            type="primary"
-            @click="
-              showAddDialog = true;
-              selectRandomColor();
-            "
-          >
-            <el-icon>
-              <Plus />
-            </el-icon>
-            新增人员
-          </el-button>
+          <div style="display:flex;gap:8px;align-items:center;">
+            <el-button
+              type="primary"
+              :icon="Plus"
+              @click="
+                showAddDialog = true;
+                selectRandomColor();
+              "
+            >
+              新增人员
+            </el-button>
+            <el-button @click="handleImportPeople" :icon="Upload">
+
+              导入
+            </el-button>
+            <el-button @click="handleExportPeople" :icon="Download">
+              导出
+            </el-button>
+          </div>
         </div>
       </template>
 
@@ -68,24 +75,26 @@
             </span>
           </template>
         </el-table-column>
-        <el-table-column label="操作" width="160" fixed="right">
+        <el-table-column label="操作" width="180" fixed="right">
           <template #default="{ row }">
-            <el-button type="primary" size="small" @click="handleEdit(row)">
-              <el-icon>
-                <Edit />
-              </el-icon>
+            <el-button type="primary" size="small" @click="handleEdit(row)" :icon="Edit">
               编辑
             </el-button>
-            <el-button type="danger" size="small" @click="handleDelete(row)">
-              <el-icon>
-                <Delete />
-              </el-icon>
+            <el-button type="danger" size="small" @click="handleDelete(row)" :icon="Delete">
               删除
             </el-button>
           </template>
         </el-table-column>
       </el-table>
     </el-card>
+
+    <input
+      ref="importFileRef"
+      type="file"
+      accept=".xlsx"
+      style="display:none;"
+      @change="handleImportFileChange"
+    />
 
     <!-- 新增/编辑对话框 -->
     <el-dialog
@@ -132,10 +141,12 @@
 <script setup lang="ts">
 import { ref, onMounted, reactive, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { Plus, Edit, Delete } from "@element-plus/icons-vue";
+import { Plus, Edit, Delete, Upload, Download } from "@element-plus/icons-vue";
 import type { Person, PersonWithStatistics } from "@/types";
 import { repositories } from "@/repositories";
 import { getCurrentMonth } from "@/utils";
+import { Workbook } from "exceljs";
+import { excelExportService } from "@/services";
 
 // 响应式数据
 const people = ref<PersonWithStatistics[]>([]);
@@ -143,6 +154,7 @@ const loading = ref(false);
 const showAddDialog = ref(false);
 const editingPerson = ref<Person | null>(null);
 const personFormRef = ref();
+const importFileRef = ref<HTMLInputElement | null>(null);
 
 // 表单数据
 const personForm = reactive({
@@ -299,6 +311,117 @@ const draggingId = ref<string | null>(null);
 const handleRowDragStart = (id: string) => {
   draggingId.value = id;
 };
+
+const handleExportPeople = async () => {
+  try {
+    const list = await repositories.people.getAll();
+    let fileName = '人员模板'
+    if (list.length > 0) {
+      fileName= '人员列表'
+    }
+    const workbook = new Workbook();
+    const sheet = workbook.addWorksheet(fileName);
+    sheet.addRow(["姓名", "颜色", "基础月休天数"]);
+    if (list.length > 0) {
+      list.forEach((p) => {
+        sheet.addRow([p.name, p.color, p.baseRestDays]);
+      });
+    }
+    const buffer = await workbook.xlsx.writeBuffer();
+    const blob = new Blob([buffer], {
+      type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+    });
+    excelExportService.downloadExcel(blob, `${fileName}.xlsx`);
+    ElMessage.success("导出成功");
+  } catch (error: any) {
+    console.error("[people-export-error]", {
+      time: new Date().toISOString(),
+      params: {},
+      message: error?.message,
+      stack: error?.stack,
+    });
+    ElMessage.error("导出失败");
+  }
+};
+
+const handleImportPeople = () => {
+  try {
+    importFileRef.value?.click();
+  } catch (error: any) {
+    console.error("[people-import-open-error]", {
+      time: new Date().toISOString(),
+      params: {},
+      message: error?.message,
+      stack: error?.stack,
+    });
+  }
+};
+
+const handleImportFileChange = async (e: Event) => {
+  const target = e.target as HTMLInputElement;
+  const file = target.files?.[0];
+  if (!file) return;
+  try {
+    const buffer = await file.arrayBuffer();
+    const workbook = new Workbook();
+    await workbook.xlsx.load(buffer);
+    const sheet = workbook.worksheets[0];
+    if (!sheet) {
+      ElMessage.error("文件内容为空");
+      return;
+    }
+    const header = sheet.getRow(1).values as any[];
+    const nameIdx = header.findIndex((v) => v === "姓名");
+    const colorIdx = header.findIndex((v) => v === "颜色");
+    const restIdx = header.findIndex((v) => v === "基础月休天数");
+    if (nameIdx < 0 || colorIdx < 0 || restIdx < 0) {
+      ElMessage.error("模板表头不正确");
+      return;
+    }
+    const rows = sheet.getRows(2, sheet.rowCount - 1) || [];
+    let created = 0;
+    for (const r of rows) {
+      const vals = (r.values as any[]) || [];
+      const name = String(vals[nameIdx] || "").trim();
+      if (!name) continue;
+      let color = String(vals[colorIdx] || "").trim();
+      if (!color) {
+        try {
+          color = await repositories.people.getNextColor();
+        } catch {
+          color = "#FF6B6B";
+        }
+      }
+      let baseRestDays = Number(vals[restIdx] ?? 8);
+      if (Number.isNaN(baseRestDays)) baseRestDays = 8;
+      if (baseRestDays < 0) baseRestDays = 0;
+      if (baseRestDays > 31) baseRestDays = 31;
+      try {
+        await repositories.people.create({ name, color, baseRestDays });
+        created++;
+      } catch (err: any) {
+        console.error("[people-import-create-error]", {
+          time: new Date().toISOString(),
+          params: { name, color, baseRestDays },
+          message: err?.message,
+          stack: err?.stack,
+        });
+      }
+    }
+    ElMessage.success(`导入成功：${created} 条`);
+    await loadPeople();
+  } catch (error: any) {
+    console.error("[people-import-error]", {
+      time: new Date().toISOString(),
+      params: { fileName: file.name },
+      message: error?.message,
+      stack: error?.stack,
+    });
+    ElMessage.error("导入失败");
+  } finally {
+    if (importFileRef.value) importFileRef.value.value = "";
+  }
+};
 const handleRowDrop = async (targetId: string) => {
   try {
     if (!draggingId.value || draggingId.value === targetId) return;
@@ -312,7 +435,13 @@ const handleRowDrop = async (targetId: string) => {
       id: p.id,
       data: { order: idx + 1 },
     }));
-    await repositories.people.batchUpdate(updates);
+    if (repositories.people.batchUpdate) {
+      await repositories.people.batchUpdate(updates);
+    } else {
+      for (const u of updates) {
+        await repositories.people.update(u.id, u.data);
+      }
+    }
     await loadPeople();
   } catch (error) {
     console.error("[people-reorder-error]", {
@@ -335,6 +464,7 @@ const handleRowDrop = async (targetId: string) => {
 
   .el-card {
     height: 100%;
+    background: var(--el-bg-color);
   }
 
   .card-header {
@@ -370,7 +500,7 @@ const handleRowDrop = async (targetId: string) => {
   }
 
   .over-rest {
-    color: #f56c6c;
+    color: var(--el-color-error);
     font-weight: bold;
   }
 }
