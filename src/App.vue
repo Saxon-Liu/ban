@@ -105,7 +105,9 @@ onMounted(() => {
     const w = Number(localStorage.getItem(ASIDE_WIDTH_KEY) || '200')
     asideWidth.value = Number.isFinite(w) && w >= 120 && w <= 480 ? w : 200
     const c = localStorage.getItem(ASIDE_COLLAPSE_KEY)
-    asideCollapsed.value = c === 'true'
+    // 如果没有存储值，或者存储值不为 'false'，则默认为收起 (true)
+    // 即：只有明确存为 'false' 时才展开
+    asideCollapsed.value = c !== 'false'
   } catch (error: any) {
     console.error('[aside-init-error]', {
       time: new Date().toISOString(),
