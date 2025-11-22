@@ -76,7 +76,7 @@
                 <div class="schedule-cell"
                      :class="{ 'drag-over': dragState.active && dragState.targetDate === row.date && dragState.targetShiftId === shift.id }"
                      :data-date="row.date" :data-shift-id="shift.id" @drop="handleCellDrop($event, row.date, shift.id)"
-                     @dragover="handleCellDragOver($event, row.date, shift.id)" @dragleave="handleCellDragLeave($event)"
+                     @dragover="handleCellDragOver($event, row.date, shift.id)" @dragleave="handleCellDragLeave()"
                      @click="handleCellClick(row.date, shift.id)">
                   <!-- 整格拖拽手柄 -->
                   <div v-if="getSchedulePersonIds(row.date, shift.id).length > 0" class="cell-handle" draggable="true"
@@ -432,7 +432,7 @@ const handleCellDragOver = (
   dragState.value.targetIndex = insertIndex;
 };
 
-const handleCellDragLeave = (event: DragEvent) => {
+const handleCellDragLeave = () => {
   // no-op
 };
 
@@ -823,14 +823,6 @@ const getSchedulePersonIds = (date: string, shiftId: string) => {
     })
     .map((s) => s.personId);
 };
-
-// 占位，已废弃但保留类型兼容
-const handleTagDrop = async (
-  event: DragEvent,
-  targetPersonId: string,
-  date: string,
-  shiftId: string
-) => { };
 
 /**
  * 获取人员颜色
