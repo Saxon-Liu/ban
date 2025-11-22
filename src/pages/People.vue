@@ -28,19 +28,16 @@
 
       <el-table
         :data="people"
-        style="width: 100%"
+        style="width: 100%; flex: 1;"
         v-loading="loading"
         row-key="id"
+        id="people-table"
+        height="100%"
       >
         <el-table-column label="排序" width="60" fixed="left" align="center">
-          <template #default="{ row }">
-            <div
-              :draggable="true"
-              @dragstart="handleRowDragStart(row.id)"
-              @dragover.prevent
-              @drop="handleRowDrop(row.id)"
-            >
-              ≡
+          <template #default>
+            <div class="drag-handle">
+              <el-icon><Rank /></el-icon>
             </div>
           </template>
         </el-table-column>
@@ -139,13 +136,14 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, reactive, watch } from "vue";
+import { ref, onMounted, reactive, watch, nextTick } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { Plus, Edit, Delete, Upload, Download } from "@element-plus/icons-vue";
+import { Plus, Edit, Delete, Upload, Download, Rank } from "@element-plus/icons-vue";
 import type { Person, PersonWithStatistics } from "@/types";
 import { repositories } from "@/repositories";
 import { getCurrentMonth } from "@/utils";
 import { excelExportService } from "@/services";
+import Sortable from "sortablejs";
 
 // 响应式数据
 const people = ref<PersonWithStatistics[]>([]);
@@ -189,6 +187,8 @@ const loadPeople = async () => {
   try {
     const currentMonth = getCurrentMonth();
     people.value = await repositories.people.getAllWithStatistics(currentMonth);
+    // Re-init sortable after data load if necessary, or rely on persistent DOM
+    initSortable();
   } catch (error) {
     console.error("加载人员列表失败:", error);
     ElMessage.error("加载人员列表失败");
@@ -300,16 +300,53 @@ watch(showAddDialog, (newVal) => {
   }
 });
 
+const initSortable = () => {
+  nextTick(() => {
+    const table = document.querySelector("#people-table .el-table__body-wrapper tbody");
+    if (table) {
+      Sortable.create(table as HTMLElement, {
+        handle: ".drag-handle",
+        animation: 150,
+        ghostClass: "sortable-ghost",
+        onEnd: async (evt: any) => {
+          const { newIndex, oldIndex } = evt;
+          if (newIndex === oldIndex) return;
+          
+          // Update local array
+          const list = [...people.value];
+          const [movedItem] = list.splice(oldIndex, 1);
+          list.splice(newIndex, 0, movedItem);
+          people.value = list;
+
+          // Update backend
+          try {
+            const updates = list.map((p, idx) => ({
+              id: p.id,
+              data: { order: idx + 1 },
+            }));
+            if (repositories.people.batchUpdate) {
+              await repositories.people.batchUpdate(updates);
+            } else {
+              for (const u of updates) {
+                await repositories.people.update(u.id, u.data);
+              }
+            }
+          } catch (error) {
+            console.error("更新排序失败:", error);
+            ElMessage.error("排序保存失败");
+            // Reload to revert if failed
+            await loadPeople();
+          }
+        },
+      });
+    }
+  });
+};
+
 // 页面加载时初始化数据
 onMounted(() => {
   loadPeople();
 });
-
-// 拖拽排序
-const draggingId = ref<string | null>(null);
-const handleRowDragStart = (id: string) => {
-  draggingId.value = id;
-};
 
 const handleExportPeople = async () => {
   try {
@@ -423,49 +460,25 @@ const handleImportFileChange = async (e: Event) => {
     if (importFileRef.value) importFileRef.value.value = "";
   }
 };
-const handleRowDrop = async (targetId: string) => {
-  try {
-    if (!draggingId.value || draggingId.value === targetId) return;
-    const list = [...people.value];
-    const from = list.findIndex((p) => p.id === draggingId.value);
-    const to = list.findIndex((p) => p.id === targetId);
-    if (from < 0 || to < 0) return;
-    const [moved] = list.splice(from, 1);
-    list.splice(to, 0, moved);
-    const updates = list.map((p, idx) => ({
-      id: p.id,
-      data: { order: idx + 1 },
-    }));
-    if (repositories.people.batchUpdate) {
-      await repositories.people.batchUpdate(updates);
-    } else {
-      for (const u of updates) {
-        await repositories.people.update(u.id, u.data);
-      }
-    }
-    await loadPeople();
-  } catch (error) {
-    console.error("[people-reorder-error]", {
-      time: new Date().toISOString(),
-      params: { draggingId: draggingId.value, targetId },
-      message: (error as any)?.message,
-      stack: (error as any)?.stack,
-    });
-    ElMessage.error("排序失败");
-  } finally {
-    draggingId.value = null;
-  }
-};
 </script>
 
 <style lang="scss" scoped>
 .people-page {
   height: 100%;
-  min-height: 300px;
-
+  /* min-height: 300px; Remove explicit min-height to allow flex shrinking if needed, or keep if desired */
+  
   .el-card {
     height: 100%;
     background: var(--el-bg-color);
+    display: flex;
+    flex-direction: column;
+  }
+  
+  :deep(.el-card__body) {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
   }
 
   .card-header {
@@ -503,6 +516,44 @@ const handleRowDrop = async (targetId: string) => {
   .over-rest {
     color: var(--el-color-error);
     font-weight: bold;
+  }
+
+  .drag-handle {
+    cursor: grab;
+    padding: 8px;
+    border-radius: 4px;
+    color: var(--el-text-color-secondary);
+    transition: all 0.2s;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+
+    &:hover {
+      background-color: var(--el-fill-color-light);
+      color: var(--el-color-primary);
+      transform: scale(1.2);
+    }
+
+    &:active {
+      cursor: grabbing;
+      transform: scale(1.1);
+    }
+
+    .el-icon {
+      font-size: 18px;
+    }
+  }
+
+  :deep(.el-table__row) {
+    &.sortable-ghost {
+      opacity: 0.5;
+      background-color: var(--el-color-primary-light-9);
+      border: 1px dashed var(--el-color-primary);
+      
+      td {
+        background-color: transparent !important;
+      }
+    }
   }
 }
 </style>

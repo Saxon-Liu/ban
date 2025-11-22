@@ -51,6 +51,7 @@ export interface Schedule extends BaseEntity {
   date: string
   /** 月份（YYYY-MM格式，用于快速查询） */
   month: string
+  order?: number
 }
 
 /**
@@ -130,7 +131,7 @@ export type UpdateData<T extends BaseEntity> = Partial<Omit<T, 'id' | 'createdAt
  */
 export interface DragData {
   /** 拖拽类型 */
-  type: 'person' | 'schedule'
+  type: 'person' | 'schedule' | 'cell'
   /** 人员ID */
   personId: string
   /** 源日期（排班拖拽时） */

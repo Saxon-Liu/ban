@@ -14,20 +14,16 @@
       <div class="shift-section">
         <el-table
           :data="shifts"
-          style="width: 100%"
+          style="width: 100%; flex: 1;"
           v-loading="loading"
           row-key="id"
+          id="shifts-table"
+          height="100%"
         >
-          <el-table-column label="排序" width="80">
-            <template #default="{ row }">
-              <div
-                class="drag-handle"
-                :draggable="true"
-                @dragstart="handleRowDragStart(row.id)"
-                @dragover.prevent
-                @drop="handleRowDrop(row.id)"
-              >
-                ≡
+          <el-table-column label="排序" width="80" align="center">
+            <template #default>
+              <div class="drag-handle">
+                <el-icon><Rank /></el-icon>
               </div>
             </template>
           </el-table-column>
@@ -91,11 +87,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, reactive, watch } from "vue";
+import { ref, onMounted, reactive, watch, nextTick } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { Plus, Edit, Delete } from "@element-plus/icons-vue";
+import { Plus, Edit, Delete, Rank } from "@element-plus/icons-vue";
 import type { Shift } from "@/types";
 import { repositories } from "@/repositories";
+import Sortable from "sortablejs";
 
 // 响应式数据
 const shifts = ref<Shift[]>([]);
@@ -136,6 +133,8 @@ const loadShifts = async () => {
       总班次: all.length,
       班次列表: all.map((s) => s.name),
     });
+    // Re-init sortable after data load if necessary
+    initSortable();
   } catch (error) {
     console.error("[loadShifts-error]", {
       time: new Date().toISOString(),
@@ -147,6 +146,48 @@ const loadShifts = async () => {
   } finally {
     loading.value = false;
   }
+};
+
+const initSortable = () => {
+  nextTick(() => {
+    const table = document.querySelector("#shifts-table .el-table__body-wrapper tbody");
+    if (table) {
+      Sortable.create(table as HTMLElement, {
+        handle: ".drag-handle",
+        animation: 150,
+        ghostClass: "sortable-ghost",
+        onEnd: async (evt: any) => {
+          const { newIndex, oldIndex } = evt;
+          if (newIndex === oldIndex) return;
+
+          // Update local array
+          const list = [...shifts.value];
+          const [movedItem] = list.splice(oldIndex, 1);
+          list.splice(newIndex, 0, movedItem);
+          shifts.value = list;
+
+          // Update backend
+          try {
+            const updates = list.map((s, idx) => ({
+              id: s.id,
+              data: { order: idx + 1 },
+            }));
+            if (repositories.shifts.batchUpdate) {
+              await repositories.shifts.batchUpdate(updates);
+            } else {
+              for (const u of updates) {
+                await repositories.shifts.update(u.id, u.data);
+              }
+            }
+          } catch (error) {
+            console.error("更新排序失败:", error);
+            ElMessage.error("排序保存失败");
+            await loadShifts();
+          }
+        },
+      });
+    }
+  });
 };
 
 /**
@@ -269,56 +310,24 @@ watch(showAddDialog, (newVal) => {
 onMounted(() => {
   loadShifts();
 });
-
-// 拖拽排序
-const draggingId = ref<string | null>(null);
-const handleRowDragStart = (id: string) => {
-  draggingId.value = id;
-};
-const handleRowDrop = async (targetId: string) => {
-  try {
-    if (!draggingId.value || draggingId.value === targetId) return;
-    const list = [...shifts.value];
-    const from = list.findIndex((s) => s.id === draggingId.value);
-    const to = list.findIndex((s) => s.id === targetId);
-    if (from < 0 || to < 0) return;
-    const [moved] = list.splice(from, 1);
-    list.splice(to, 0, moved);
-    // 重新计算并持久化顺序
-    const updates = list.map((s, idx) => ({
-      id: s.id,
-      data: { order: idx + 1 },
-    }));
-    if (repositories.shifts.batchUpdate) {
-      await repositories.shifts.batchUpdate(updates);
-    } else {
-      for (const u of updates) {
-        await repositories.shifts.update(u.id, u.data);
-      }
-    }
-    shifts.value = await repositories.shifts.getAll();
-  } catch (error) {
-    console.error("[shift-reorder-error]", {
-      time: new Date().toISOString(),
-      params: { draggingId: draggingId.value, targetId },
-      message: (error as any)?.message,
-      stack: (error as any)?.stack,
-    });
-    ElMessage.error("排序失败");
-  } finally {
-    draggingId.value = null;
-  }
-};
 </script>
 
 <style lang="scss" scoped>
 .shifts-page {
   height: 100%;
-  min-height: 300px;
-
+  
   .el-card {
     height: 100%;
     background: var(--el-bg-color);
+    display: flex;
+    flex-direction: column;
+  }
+
+  :deep(.el-card__body) {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
   }
 
   .card-header {
@@ -328,7 +337,11 @@ const handleRowDrop = async (targetId: string) => {
   }
 
   .shift-section {
-    margin-bottom: 30px;
+    margin-bottom: 0;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
 
     h3 {
       margin-bottom: 15px;
@@ -360,6 +373,44 @@ const handleRowDrop = async (targetId: string) => {
     height: 30px;
     border-radius: 4px;
     border: 1px solid #ddd;
+  }
+
+  .drag-handle {
+    cursor: grab;
+    padding: 8px;
+    border-radius: 4px;
+    color: var(--el-text-color-secondary);
+    transition: all 0.2s;
+    display: flex;
+    justify-content: center;
+    align-items: center;
+
+    &:hover {
+      background-color: var(--el-fill-color-light);
+      color: var(--el-color-primary);
+      transform: scale(1.2);
+    }
+
+    &:active {
+      cursor: grabbing;
+      transform: scale(1.1);
+    }
+
+    .el-icon {
+      font-size: 18px;
+    }
+  }
+
+  :deep(.el-table__row) {
+    &.sortable-ghost {
+      opacity: 0.5;
+      background-color: var(--el-color-primary-light-9);
+      border: 1px dashed var(--el-color-primary);
+      
+      td {
+        background-color: transparent !important;
+      }
+    }
   }
 }
 </style>

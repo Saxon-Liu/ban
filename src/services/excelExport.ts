@@ -77,6 +77,21 @@ export class ExcelExportService {
       shifts.forEach(shift => {
         const personIds = daySchedules
           .filter(s => s.shiftId === shift.id)
+          .sort((a, b) => {
+            const ao = a.order ?? 0
+            const bo = b.order ?? 0
+            if (ao !== bo) return ao - bo
+            
+            // 处理createdAt可能是字符串或Date的情况
+            const getTimestamp = (d: any) => {
+              if (!d) return 0
+              if (d instanceof Date) return d.getTime()
+              if (typeof d === 'string') return new Date(d).getTime()
+              return 0
+            }
+            
+            return getTimestamp(a.createdAt) - getTimestamp(b.createdAt)
+          })
           .map(s => s.personId)
         
         shiftPeople[shift.name] = personIds

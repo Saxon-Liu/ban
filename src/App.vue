@@ -74,7 +74,7 @@ const themeMode = ref<'system' | 'light' | 'dark'>('system')
 const ASIDE_WIDTH_KEY = 'aside-width'
 const ASIDE_COLLAPSE_KEY = 'aside-collapsed'
 const asideWidth = ref(200)
-const asideCollapsed = ref(false)
+const asideCollapsed = ref(true)
 
 const isSystemDark = () => window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
 const applyTheme = () => {
