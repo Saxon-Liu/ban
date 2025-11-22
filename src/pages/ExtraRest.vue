@@ -19,7 +19,7 @@
         </div>
       </template>
 
-      <el-table :data="configs" style="width: 100%" v-loading="loading">
+      <el-table :data="configs" style="width: 100%; flex: 1;" v-loading="loading" height="100%">
         <el-table-column prop="month" label="月份" width="80">
           <template #default="{ row }"> {{ row.month }}月 </template>
         </el-table-column>
@@ -150,11 +150,19 @@ onMounted(() => {
 <style lang="scss" scoped>
 .extra-rest-page {
   height: 100%;
-  min-height: 300px;
-
+  
   .el-card {
     height: 100%;
     background: var(--el-bg-color);
+    display: flex;
+    flex-direction: column;
+  }
+
+  :deep(.el-card__body) {
+    flex: 1;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
   }
 
   .card-header {

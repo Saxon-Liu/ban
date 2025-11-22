@@ -5,14 +5,8 @@
         <div class="page-header">
           <span>排班管理</span>
           <div class="header-actions">
-            <el-date-picker
-              v-model="currentMonth"
-              type="month"
-              placeholder="选择月份"
-              format="YYYY年MM月"
-              value-format="YYYY-MM"
-              @change="handleMonthChange"
-            />
+            <el-date-picker v-model="currentMonth" type="month" placeholder="选择月份" format="YYYY年MM月"
+                            value-format="YYYY-MM" @change="handleMonthChange" :editable="false" :clearable="false" />
             <el-button type="primary" @click="exportToExcel">
               <el-icon>
                 <Download />
@@ -29,31 +23,18 @@
           <h3>人员列表</h3>
           <div class="people-list">
             <el-scrollbar>
-              <div
-                v-for="person in peopleWithStats"
-                :key="person.id"
-                class="person-tag"
-                :draggable="true"
-                @dragstart="
-                  handlePersonDragStart($event, person as PersonWithStatistics)
-                "
-              >
-                <div
-                  class="person-color"
-                  :style="{ backgroundColor: person.color }"
-                ></div>
+              <div v-for="person in peopleWithStats" :key="person.id" class="person-tag" :draggable="true"
+                   @dragstart="handlePersonDragStart($event, person)" @dragend="handleDragEnd">
+                <div class="person-color" :style="{ backgroundColor: person.color }"></div>
                 <div class="person-info">
                   <span class="person-name">{{ person.name }}</span>
-                  <span
-                    class="person-rest-days"
-                    :class="{ 'over-rest': person.statistics?.isOverRest }"
-                  >
+                  <span class="person-rest-days" :class="{ 'over-rest': person.statistics?.isOverRest }">
                     {{
                       person.statistics
                         ? person.statistics.isOverRest
                           ? `超休${Math.abs(
-                              person.statistics.remainingRestDays
-                            )}天`
+                            person.statistics.remainingRestDays
+                          )}天`
                           : `剩余休息${person.statistics.remainingRestDays}天`
                         : "加载中..."
                     }}
@@ -66,46 +47,25 @@
 
         <!-- 右侧排班表格 -->
         <div class="schedule-table-container">
-          <el-table
-            :data="monthDates"
-            style="width: 100%"
-            border
-            size="small"
-            height="calc(100vh - 190px)"
-          >
-            <el-table-column prop="date" label="日期" width="120" fixed>
+          <el-table :data="monthDates" style="width: 100%" border size="small" height="calc(100vh - 190px)">
+            <el-table-column prop="date" label="日期" width="100" fixed>
               <template #default="{ row }">
                 <div class="date-cell">
-                  <div class="date">{{ formatDate(row.date, "MM-DD") }}</div>
-                  <div
-                    class="weekday"
-                    :class="{ 'is-weekend': row.weekdayName === '周六' || row.weekdayName === '周日' }"
-                  >
+                  <div :class="{ date: true, 'is-weekend': row.weekdayName === '周六' || row.weekdayName === '周日' }">{{
+                    formatDate(row.date, "MM-DD") }}</div>
+                  <div class="weekday" :class="{ 'is-weekend': row.weekdayName === '周六' || row.weekdayName === '周日' }">
                     {{ row.weekdayName }}
                   </div>
                 </div>
               </template>
             </el-table-column>
 
-            <el-table-column
-              v-for="shift in shifts"
-              :key="shift.id"
-              :label="shift.name"
-              min-width="150"
-            >
+            <el-table-column v-for="shift in shifts" :key="shift.id" :label="shift.name" min-width="150">
               <template #default="{ row }">
-              <!-- 占位 撑开call高度 -->
-                <el-space wrap style="opacity: 0;pointer-events: none;">
-                  <template
-                    v-for="personId in getSchedulePersonIds(row.date, shift.id)"
-                    :key="personId"
-                  >
-                    <el-tag
-                      size="large"
-                      class="schedule-tag"
-                      closable
-                      disable-transitions
-                    >
+                <!-- 占位 撑开call高度 -->
+                <el-space wrap style="opacity: 0;pointer-events: none;padding:2px 0">
+                  <template v-for="personId in getSchedulePersonIds(row.date, shift.id)" :key="personId">
+                    <el-tag class="schedule-tag" closable disable-transitions>
                       <span>
                         {{ getPersonName(personId) }}
                       </span>
@@ -113,73 +73,47 @@
                   </template>
                 </el-space>
                 <!-- 占满整个cell -->
-                <div
-                  class="schedule-cell"
-                  :data-date="row.date"
-                  :data-shift-id="shift.id"
-                  @drop="handleCellDrop($event, row.date, shift.id)"
-                  @dragover.prevent
-                  @click="handleCellClick(row.date, shift.id)"
-                >
+                <div class="schedule-cell"
+                     :class="{ 'drag-over': dragState.active && dragState.targetDate === row.date && dragState.targetShiftId === shift.id }"
+                     :data-date="row.date" :data-shift-id="shift.id" @drop="handleCellDrop($event, row.date, shift.id)"
+                     @dragover="handleCellDragOver($event, row.date, shift.id)" @dragleave="handleCellDragLeave($event)"
+                     @click="handleCellClick(row.date, shift.id)">
+                  <!-- 整格拖拽手柄 -->
+                  <div v-if="getSchedulePersonIds(row.date, shift.id).length > 0" class="cell-handle" draggable="true"
+                       @dragstart.stop="handleCellHandleDragStart($event, row.date, shift.id)" @click.stop
+                       title="拖拽移动，按住Ctrl拖拽复制">
+                    <el-icon>
+                      <Rank />
+                    </el-icon>
+                  </div>
                   <el-space wrap>
-                    <template
-                      v-for="personId in getSchedulePersonIds(
-                        row.date,
-                        shift.id
-                      )"
-                      :key="personId"
-                    >
-                      <el-tag
-                        size="large"
-                        class="schedule-tag"
-                        closable
-                        disable-transitions
-                        @close="removeSchedule(personId, row.date, shift.id)"
-                        :draggable="true"
-                        @dragstart="handleScheduleDragStart($event, personId, row.date, shift.id)"
-                        :style="{
-                          backgroundColor: getPersonColor(personId),
-                          color: getAdaptiveTextColor(getPersonColor(personId)),
-                        }"
-                      >
+                    <template v-for="(personId, index) in getSchedulePersonIds(
+                      row.date,
+                      shift.id
+                    )" :key="personId">
+                      <!-- 插入点在当前元素之前 -->
+                      <div v-if="showPlaceholderAt(row.date, shift.id, index)" class="schedule-placeholder"></div>
+
+                      <el-tag class="schedule-tag" :data-person-id="personId"
+                              :class="{ 'is-dragging': dragState.active && dragState.personId === personId && dragState.type === 'schedule' }"
+                              closable disable-transitions @close="removeSchedule(personId, row.date, shift.id)"
+                              :draggable="true"
+                              @dragstart="handleScheduleDragStart($event, personId, row.date, shift.id)"
+                              @dragend="handleDragEnd" :style="{
+                                backgroundColor: getPersonColor(personId),
+                                color: getAdaptiveTextColor(getPersonColor(personId)),
+                                opacity: (dragState.active && dragState.personId === personId && dragState.type === 'schedule') ? 0.4 : 1
+                              }">
                         <span>
                           {{ getPersonName(personId) }}
                         </span>
                       </el-tag>
                     </template>
+
+                    <!-- 插入点在列表末尾 -->
+                    <div v-if="showPlaceholderAt(row.date, shift.id, getSchedulePersonIds(row.date, shift.id).length)"
+                         class="schedule-placeholder"></div>
                   </el-space>
-                  <!-- <div
-                    v-for="personId in getSchedulePersonIds(row.date, shift.id)"
-                    :key="personId"
-                    class="schedule-person"
-                    :draggable="true"
-                    @dragstart="
-                      handleScheduleDragStart(
-                        $event,
-                        personId,
-                        row.date,
-                        shift.id
-                      )
-                    "
-                  >
-                    <div
-                      class="person-color-small"
-                      :style="{ backgroundColor: getPersonColor(personId) }"
-                    ></div>
-                    <span class="person-name-small">{{
-                      getPersonName(personId)
-                    }}</span>
-                    <el-button
-                      type="danger"
-                      size="small"
-                      circle
-                      @click.stop="removeSchedule(personId, row.date, shift.id)"
-                    >
-                      <el-icon>
-                        <Close />
-                      </el-icon>
-                    </el-button>
-                  </div> -->
                 </div>
               </template>
             </el-table-column>
@@ -196,40 +130,25 @@
           </div>
           <div class="scheduled-people">
             <el-row :gutter="10">
-              <el-col
-                :span="12"
-                v-for="personId in getSchedulePersonIds(
-                  selectedDate,
-                  selectedShiftId
-                )"
-                :key="personId"
-              >
+              <el-col :span="12" v-for="personId in getSchedulePersonIds(
+                selectedDate,
+                selectedShiftId
+              )" :key="personId">
                 <div class="scheduled-person-item">
-                  <div
-                    class="person-color"
-                    :style="{ backgroundColor: getPersonColor(personId) }"
-                  ></div>
+                  <div class="person-color" :style="{ backgroundColor: getPersonColor(personId) }"></div>
                   <span class="person-name">{{ getPersonName(personId) }}</span>
-                  <el-button
-                    type="danger"
-                    size="small"
-                    @click="
-                      removeSchedule(personId, selectedDate, selectedShiftId)
-                    "
-                    style="margin-left: auto"
-                  >
+                  <el-button type="danger" size="small" @click="
+                    removeSchedule(personId, selectedDate, selectedShiftId)
+                    " style="margin-left: auto">
                     删除
                   </el-button>
                 </div>
               </el-col>
             </el-row>
           </div>
-          <div
-            v-if="
-              getSchedulePersonIds(selectedDate, selectedShiftId).length === 0
-            "
-            class="no-schedule"
-          >
+          <div v-if="
+            getSchedulePersonIds(selectedDate, selectedShiftId).length === 0
+          " class="no-schedule">
             暂无排班
           </div>
         </div>
@@ -241,7 +160,7 @@
 <script setup lang="ts">
 import { ref, onMounted, computed } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { Download } from "@element-plus/icons-vue";
+import { Download, Rank } from "@element-plus/icons-vue";
 import type {
   Person,
   PersonWithStatistics,
@@ -252,10 +171,22 @@ import type {
 //
 import { repositories } from "@/repositories";
 import { excelExportService } from "@/services";
-import { getMonthDates, formatDate, getCurrentMonth } from "@/utils";
+import { getMonthDates, formatDate, getCurrentMonth, getNextMonth } from "@/utils";
+
+const LAST_VIEWED_MONTH_KEY = "schedule_last_viewed_month";
+
+/**
+ * 获取初始月份
+ * 优先从localStorage获取，如果不存在则默认为下个月
+ */
+const getInitialMonth = () => {
+  const saved = localStorage.getItem(LAST_VIEWED_MONTH_KEY);
+  if (saved) return saved;
+  return getNextMonth(getCurrentMonth());
+};
 
 // 响应式数据
-const currentMonth = ref(getCurrentMonth());
+const currentMonth = ref(getInitialMonth());
 const people = ref<Person[]>([]);
 const shifts = ref<Shift[]>([]);
 const schedules = ref<Schedule[]>([]);
@@ -264,6 +195,21 @@ const showScheduleDetail = ref(false);
 const selectedDate = ref("");
 const selectedShiftId = ref("");
 const extraRestDaysForCurrentMonth = ref(0);
+
+const dragState = ref<{
+  active: boolean;
+  type: "person" | "schedule" | "cell";
+  personId: string;
+  sourceDate?: string;
+  sourceShiftId?: string;
+  targetDate?: string;
+  targetShiftId?: string;
+  targetIndex?: number;
+}>({
+  active: false,
+  type: "person",
+  personId: "",
+});
 
 // 计算属性
 const peopleWithStats = computed(() => {
@@ -326,11 +272,11 @@ const loadData = async () => {
  */
 const calculatePersonStatistics = (personId: string, month: string) => {
   const person = people.value.find((p) => p.id === personId);
-  if (!person) return null;
+  if (!person) return undefined;
 
   // 这里简化计算，实际应该从Repository获取
   const restShift = shifts.value.find((s) => (s as any).isRest === true);
-  if (!restShift) return null;
+  if (!restShift) return undefined;
 
   const monthSchedules = schedules.value.filter(
     (s) =>
@@ -356,6 +302,7 @@ const calculatePersonStatistics = (personId: string, month: string) => {
  * 处理月份变更
  */
 const handleMonthChange = async () => {
+  localStorage.setItem(LAST_VIEWED_MONTH_KEY, currentMonth.value);
   await loadData();
 };
 
@@ -373,10 +320,121 @@ const handlePersonDragStart = (
     personId: person.id,
   };
 
+  dragState.value = {
+    active: true,
+    type: "person",
+    personId: person.id,
+    targetIndex: -1
+  };
+
   event.dataTransfer.setData("text/plain", JSON.stringify(dragData));
   event.dataTransfer.effectAllowed = "move";
 };
 
+/**
+ * 处理拖拽结束
+ */
+const handleDragEnd = () => {
+  dragState.value = {
+    active: false,
+    type: "person",
+    personId: "",
+    targetDate: undefined,
+    targetShiftId: undefined,
+    targetIndex: undefined
+  };
+};
+
+/**
+ * 判断是否显示占位符
+ */
+const showPlaceholderAt = (date: string, shiftId: string, index: number) => {
+  return (
+    dragState.value.active &&
+    dragState.value.targetDate === date &&
+    dragState.value.targetShiftId === shiftId &&
+    dragState.value.targetIndex === index
+  );
+};
+
+/**
+ * 处理单元格拖拽进入/悬停
+ */
+const handleCellDragOver = (
+  event: DragEvent,
+  date: string,
+  shiftId: string
+) => {
+  event.preventDefault();
+
+  dragState.value.targetDate = date;
+  dragState.value.targetShiftId = shiftId;
+
+  const cell = event.currentTarget as HTMLElement;
+  const tags = Array.from(cell.querySelectorAll('.schedule-tag:not(.is-dragging)'));
+
+  // 如果是整格拖拽，不计算插入位置，直接放在最后
+  if (dragState.value.type === 'cell') {
+    dragState.value.targetIndex = -1;
+    return;
+  }
+
+  let insertIndex = tags.length;
+  if (tags.length > 0) {
+    for (let i = 0; i < tags.length; i++) {
+      const tag = tags[i];
+      const rect = tag.getBoundingClientRect();
+
+      // 如果鼠标在当前元素所在行的下方，说明当前元素肯定在插入点之前
+      if (event.clientY > rect.bottom) {
+        continue;
+      }
+
+      // 如果鼠标在当前元素所在行的上方，说明当前元素在插入点之后
+      if (event.clientY < rect.top) {
+        insertIndex = i;
+        break;
+      }
+
+      // 如果在同一行，比较 X
+      const centerX = rect.left + rect.width / 2;
+      if (event.clientX < centerX) {
+        insertIndex = i;
+        break;
+      }
+    }
+  }
+
+  // 如果是同单元格内的拖拽，需要将 visual index 转换为真实列表的 index
+  if (
+    dragState.value.active &&
+    dragState.value.type === "schedule" &&
+    dragState.value.sourceDate === date &&
+    dragState.value.sourceShiftId === shiftId
+  ) {
+    if (insertIndex < tags.length) {
+      const targetEl = tags[insertIndex] as HTMLElement;
+      const targetPersonId = targetEl.dataset.personId;
+      if (targetPersonId) {
+        const fullList = getSchedulePersonIds(date, shiftId);
+        const realIndex = fullList.indexOf(targetPersonId);
+        if (realIndex !== -1) {
+          insertIndex = realIndex;
+        }
+      }
+    } else {
+      // 拖拽到末尾
+      const fullList = getSchedulePersonIds(date, shiftId);
+      insertIndex = fullList.length;
+    }
+  }
+
+  dragState.value.targetIndex = insertIndex;
+};
+
+const handleCellDragLeave = (event: DragEvent) => {
+  // no-op
+};
 
 /**
  * 处理单元格放置
@@ -392,6 +450,7 @@ const handleCellDrop = async (
   try {
     const dragDataStr = event.dataTransfer.getData("text/plain");
     const dragData: DragData = JSON.parse(dragDataStr);
+    const targetIndex = dragState.value.targetIndex ?? -1;
 
     if (
       dragData.type === "schedule" &&
@@ -400,7 +459,10 @@ const handleCellDrop = async (
     ) {
       const isSameCell =
         dragData.sourceDate === date && dragData.sourceShiftId === shiftId;
+
       if (isSameCell) {
+        await handleTagReorder(dragData.personId, date, shiftId, targetIndex);
+        handleDragEnd();
         return;
       }
 
@@ -411,6 +473,7 @@ const handleCellDrop = async (
         );
         if (existingScheduleForTargetDay) {
           ElMessage.warning("该员工当天已有排班，请先删除原有排班");
+          handleDragEnd();
           return;
         }
       }
@@ -423,57 +486,281 @@ const handleCellDrop = async (
       );
       if (sourceSchedule) {
         await repositories.schedules.delete(sourceSchedule.id);
-        schedules.value = schedules.value.filter((s) => s.id !== sourceSchedule.id);
+        schedules.value = schedules.value.filter(
+          (s) => s.id !== sourceSchedule.id
+        );
       }
     }
 
-    // 从人员列表拖拽时，检查当天是否已有排班
+    if (dragData.type === "cell" && dragData.sourceDate && dragData.sourceShiftId) {
+      const sourceDate = dragData.sourceDate;
+      const sourceShiftId = dragData.sourceShiftId;
+
+      // 如果目标和源相同，无操作
+      if (sourceDate === date && sourceShiftId === shiftId) {
+        handleDragEnd();
+        return;
+      }
+
+      const sourceSchedules = schedules.value.filter(s => s.date === sourceDate && s.shiftId === sourceShiftId);
+      if (sourceSchedules.length === 0) {
+        handleDragEnd();
+        return;
+      }
+
+      // 判断是复制还是移动 (Ctrl键)
+      const isCopy = event.ctrlKey || event.metaKey;
+
+      let conflictCount = 0;
+      const newSchedulesToCreate: any[] = [];
+
+      // 获取目标单元格现有的最大order
+      const existingTargetSchedules = schedules.value.filter(s => s.date === date && s.shiftId === shiftId);
+      let maxOrder = existingTargetSchedules.reduce((max, s) => Math.max(max, s.order || 0), 0);
+
+      for (const sourceItem of sourceSchedules) {
+        // 检查目标日期冲突
+        if (sourceItem.date !== date) {
+          const conflictSchedule = schedules.value.find(s => s.personId === sourceItem.personId && s.date === date);
+          if (conflictSchedule) {
+            conflictCount++;
+            continue;
+          }
+        }
+
+        // 检查目标单元格是否已存在该人
+        const alreadyInCell = schedules.value.find(s => s.personId === sourceItem.personId && s.date === date && s.shiftId === shiftId);
+        if (alreadyInCell) {
+          continue;
+        }
+
+        maxOrder++;
+        newSchedulesToCreate.push({
+          personId: sourceItem.personId,
+          shiftId: shiftId,
+          date: date,
+          month: currentMonth.value,
+          order: maxOrder,
+          sourceId: sourceItem.id // 暂存源ID用于移动时的删除
+        });
+      }
+
+      if (newSchedulesToCreate.length === 0) {
+        if (conflictCount > 0) {
+          ElMessage.warning(`操作失败：所有人员在目标日期已有排班`);
+        }
+        handleDragEnd();
+        return;
+      }
+
+      // 如果是移动，删除源记录
+      if (!isCopy) {
+        const movedPersonIds = newSchedulesToCreate.map(n => n.personId);
+        const schedulesToDelete = sourceSchedules.filter(s => movedPersonIds.includes(s.personId));
+
+        // 乐观更新
+        schedules.value = schedules.value.filter(s => !schedulesToDelete.find(del => del.id === s.id));
+
+        // 后台删除
+        for (const s of schedulesToDelete) {
+          await repositories.schedules.delete(s.id);
+        }
+      }
+
+      // 创建新记录
+      for (const newItem of newSchedulesToCreate) {
+        // 删除临时字段 sourceId
+        const { sourceId, ...dataToCreate } = newItem;
+        await repositories.schedules.create(dataToCreate);
+      }
+
+      const actionName = isCopy ? '复制' : '移动';
+      let msg = `${actionName}成功 ${newSchedulesToCreate.length} 人`;
+      if (conflictCount > 0) {
+        msg += `，${conflictCount} 人因冲突跳过`;
+      }
+      ElMessage.success(msg);
+
+      await loadData();
+      handleDragEnd();
+      return;
+    }
+
     if (dragData.type === "person") {
       const existingSchedule = schedules.value.find(
         (s) => s.personId === dragData.personId && s.date === date
       );
       if (existingSchedule) {
         ElMessage.warning("该员工当天已有排班，请先删除原有排班");
+        handleDragEnd();
         return;
       }
     }
 
-    // 检查是否为休息班次
     const shift = shifts.value.find((s) => s.id === shiftId);
     if ((shift as any)?.isRest === true) {
       const person = people.value.find((p) => p.id === dragData.personId);
       if (person) {
         const stats = calculatePersonStatistics(person.id, currentMonth.value);
         if (stats && stats.remainingRestDays <= 0) {
-          await ElMessageBox.confirm(
-            `${person.name} 的剩余休息天数为 ${stats.remainingRestDays}，确定要继续排休吗？`,
-            "超额排休提醒",
-            {
-              confirmButtonText: "确定",
-              cancelButtonText: "取消",
-              type: "warning",
-            }
-          ).catch(() => {
-            return; // 用户取消
-          });
+          try {
+            await ElMessageBox.confirm(
+              `${person.name} 的剩余休息天数为 ${stats.remainingRestDays}，确定要继续排休吗？`,
+              "超额排休提醒",
+              {
+                confirmButtonText: "确定",
+                cancelButtonText: "取消",
+                type: "warning",
+              }
+            );
+          } catch {
+            handleDragEnd();
+            return;
+          }
         }
       }
     }
 
-    // 创建新排班记录
-    await repositories.schedules.create({
-      personId: dragData.personId,
-      shiftId,
-      date,
-      month: currentMonth.value,
-    });
+    const existingCell = schedules.value
+      .filter((s) => s.date === date && s.shiftId === shiftId)
+      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
+
+    if (targetIndex >= 0) {
+      const newSchedules = [...existingCell];
+      const newScheduleData = {
+        personId: dragData.personId,
+        shiftId,
+        date,
+        month: currentMonth.value,
+        order: 0,
+      };
+
+      newSchedules.splice(targetIndex, 0, newScheduleData as any);
+      const updates = newSchedules.map((s, idx) => ({
+        id: s.id,
+        data: { order: idx + 1 },
+      }));
+
+      await repositories.schedules.create({
+        ...newScheduleData,
+        order: targetIndex + 1,
+      });
+
+      const updatesToRun = updates.filter((u) => u.id);
+      if (updatesToRun.length > 0) {
+        if ((repositories as any)?.schedules?.batchUpdate) {
+          await (repositories.schedules as any).batchUpdate(updatesToRun);
+        } else {
+          for (const u of updatesToRun) {
+            await repositories.schedules.update(u.id, u.data);
+          }
+        }
+      }
+    } else {
+      const maxOrder = existingCell.reduce(
+        (m, s) => Math.max(m, s.order ?? 0),
+        0
+      );
+      await repositories.schedules.create({
+        personId: dragData.personId,
+        shiftId,
+        date,
+        month: currentMonth.value,
+        order: maxOrder + 1,
+      });
+    }
 
     ElMessage.success("排班成功");
     await loadData();
   } catch (error) {
     console.error("排班失败:", error);
     ElMessage.error("排班失败");
+  } finally {
+    handleDragEnd();
   }
+};
+
+/**
+ * 处理同单元格内的排序
+ */
+const handleTagReorder = async (
+  personId: string,
+  date: string,
+  shiftId: string,
+  targetIndex: number
+) => {
+  const cellList = schedules.value
+    .filter((s) => s.date === date && s.shiftId === shiftId)
+    .sort((a, b) => {
+      const ao = a.order ?? 0;
+      const bo = b.order ?? 0;
+      if (ao !== bo) return ao - bo;
+      const at = a.createdAt?.getTime?.() ? a.createdAt.getTime() : 0;
+      const bt = b.createdAt?.getTime?.() ? b.createdAt.getTime() : 0;
+      return at - bt;
+    });
+
+  const fromIndex = cellList.findIndex((s) => s.personId === personId);
+  if (fromIndex < 0 || targetIndex < 0) return;
+
+  const list = [...cellList];
+  const [moved] = list.splice(fromIndex, 1);
+
+  // 修正插入位置
+  let finalIndex = targetIndex;
+  // 如果拖动到了自己后面的位置，因为自己已经被移除了，所以index要减1
+  // 但这里我们使用的是 placeholder 的 visual index
+  // 假设: [A, B, C]. Drag A.
+  // Placeholder appears after B (index 2).
+  // list becomes [B, C]. Insert A at 2. -> [B, C, A]. Correct.
+  // But if Drag A to before B (index 0).
+  // list [B, C]. Insert A at 0. -> [A, B, C]. Correct.
+
+  // 但是，如果 visual index 是基于 "full list including dragged item" 吗？
+  // 不，我们在 dragover 中 exclude 了 .is-dragging.
+  // 所以 targetIndex 是在 "removed self" 列表中的正确索引。
+  // 不需要额外调整。
+
+  list.splice(finalIndex, 0, moved);
+
+  const updates = list.map((s, idx) => ({ id: s.id, data: { order: idx + 1 } }));
+
+  if ((repositories as any)?.schedules?.batchUpdate) {
+    await (repositories.schedules as any).batchUpdate(updates);
+  } else {
+    for (const u of updates) {
+      await repositories.schedules.update(u.id, u.data);
+    }
+  }
+
+  ElMessage.success("已更新排序");
+  await loadData();
+};
+
+const handleCellHandleDragStart = (
+  event: DragEvent,
+  sourceDate: string,
+  sourceShiftId: string
+) => {
+  if (!event.dataTransfer) return;
+
+  const dragData: DragData = {
+    type: 'cell',
+    personId: '', // 占位
+    sourceDate,
+    sourceShiftId
+  };
+
+  dragState.value = {
+    active: true,
+    type: 'cell',
+    personId: '',
+    sourceDate,
+    sourceShiftId
+  };
+
+  event.dataTransfer.setData("text/plain", JSON.stringify(dragData));
+  event.dataTransfer.effectAllowed = "copyMove"; // 允许复制或移动
 };
 
 const handleScheduleDragStart = (
@@ -490,6 +777,15 @@ const handleScheduleDragStart = (
       sourceDate,
       sourceShiftId,
     } as DragData;
+
+    dragState.value = {
+      active: true,
+      type: "schedule",
+      personId,
+      sourceDate,
+      sourceShiftId,
+    };
+
     event.dataTransfer.setData("text/plain", JSON.stringify(dragData));
     event.dataTransfer.effectAllowed = "move";
   } catch (error: any) {
@@ -517,8 +813,24 @@ const handleCellClick = (date: string, shiftId: string) => {
 const getSchedulePersonIds = (date: string, shiftId: string) => {
   return schedules.value
     .filter((s) => s.date === date && s.shiftId === shiftId)
+    .sort((a, b) => {
+      const ao = a.order ?? 0;
+      const bo = b.order ?? 0;
+      if (ao !== bo) return ao - bo;
+      const at = a.createdAt?.getTime?.() ? a.createdAt.getTime() : 0;
+      const bt = b.createdAt?.getTime?.() ? b.createdAt.getTime() : 0;
+      return at - bt;
+    })
     .map((s) => s.personId);
 };
+
+// 占位，已废弃但保留类型兼容
+const handleTagDrop = async (
+  event: DragEvent,
+  targetPersonId: string,
+  date: string,
+  shiftId: string
+) => { };
 
 /**
  * 获取人员颜色
@@ -542,9 +854,9 @@ const getAdaptiveTextColor = (bgColor: string) => {
     const bigint = parseInt(
       hex.length === 3
         ? hex
-            .split("")
-            .map((c) => c + c)
-            .join("")
+          .split("")
+          .map((c) => c + c)
+          .join("")
         : hex,
       16
     );
@@ -621,6 +933,7 @@ onMounted(() => {
 <style lang="scss" scoped>
 .schedule-page {
   height: 100%;
+
   .page-header {
     display: flex;
     justify-content: space-between;
@@ -655,6 +968,7 @@ onMounted(() => {
       width: calc(100% + 10px);
       // padding-right: 10px;
       height: calc(100% - 30px);
+
       // overflow-y: auto;
       .person-tag {
         display: flex;
@@ -717,6 +1031,14 @@ onMounted(() => {
 
     :deep(.schedule-tag) {
       border-color: transparent;
+      cursor: grab;
+      transition: transform 0.2s, opacity 0.2s;
+
+      &.is-dragging {
+        opacity: 0.4;
+        cursor: grabbing;
+      }
+
       .el-tag__close {
         color: inherit;
       }
@@ -724,11 +1046,20 @@ onMounted(() => {
   }
 
   .date-cell {
+    display: flex;
+    font-size: 14px;
     text-align: center;
-  }
-  .weekday.is-weekend {
-    color: var(--el-color-warning);
-    font-weight: 600;
+    align-items: center;
+    min-height: 28px;
+
+    .weekday {
+      margin-left: 10px;
+    }
+
+    .is-weekend {
+      color: var(--el-color-warning);
+      font-weight: 600;
+    }
   }
 
   .date {
@@ -766,6 +1097,52 @@ onMounted(() => {
       border-color: var(--el-color-success);
       background: var(--el-color-success-light-9);
     }
+
+    .cell-handle {
+      position: absolute;
+      top: 2px;
+      right: 2px;
+      width: 20px;
+      height: 20px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      background: rgba(255, 255, 255, 0.9);
+      border: 1px solid #e4e7ed;
+      border-radius: 4px;
+      cursor: grab;
+      opacity: 0;
+      transition: all 0.2s;
+      z-index: 10;
+      color: var(--el-text-color-secondary);
+
+      &:hover {
+        background: var(--el-color-primary-light-9);
+        color: var(--el-color-primary);
+        border-color: var(--el-color-primary-light-5);
+      }
+
+      &:active {
+        cursor: grabbing;
+      }
+    }
+
+    &:hover .cell-handle {
+      opacity: 1;
+    }
+  }
+
+  .schedule-placeholder {
+    width: 10px;
+    height: 26px;
+    /* Match tag height roughly */
+    background-color: var(--el-color-primary);
+    border-radius: 4px;
+    margin: 0 4px;
+    opacity: 0.5;
+    display: inline-block;
+    vertical-align: middle;
+    pointer-events: none;
   }
 
   .schedule-person {
@@ -799,6 +1176,7 @@ onMounted(() => {
 
   .scheduled-people {
     margin-top: 15px;
+
     .scheduled-person-item {
       display: flex;
       align-items: center;
@@ -814,6 +1192,7 @@ onMounted(() => {
     color: var(--el-text-color-secondary);
     padding: 20px;
   }
+
   :deep(.el-table) {
     .el-table__row .el-table__cell {
       position: relative;
