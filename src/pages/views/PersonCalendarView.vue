@@ -1,0 +1,1117 @@
+<template>
+  <div class="person-calendar-view">
+    <el-scrollbar class="content-scrollbar" v-loading="loading">
+      <div class="content" ref="calendarWrapperRef">
+        <draggable
+          :model-value="selectedPeople"
+          @update:model-value="handleDragUpdate"
+          tag="div"
+          :class="['calendar-flex', layoutClass]"
+          item-key="id"
+          handle=".drag-handle"
+          :animation="300"
+          ghost-class="ghost-card"
+          chosen-class="chosen-card"
+          drag-class="drag-card"
+        >
+          <template #item="{ element: person }">
+            <div class="calendar-card" :key="person.id">
+              <el-calendar
+                :model-value="calendarAnchor"
+                :range="calendarRange"
+                :first-day-of-week="1"
+              >
+                <template #header>
+                  <div class="calendar-card__header">
+                    <div class="person-meta drag-handle">
+                      <span
+                        class="color-dot"
+                        :style="{ backgroundColor: person.color }"
+                      />
+                      <div>
+                        <div class="person-name">{{ person.name }}</div>
+                        <div class="person-meta__sub">{{ monthLabel }}</div>
+                      </div>
+                      <div class="rest-days-tags">
+                        <el-tag
+                          v-if="person.baseRestDays"
+                          size="small"
+                          type="info"
+                        >
+                          月休 {{ person.baseRestDays }} 天
+                        </el-tag>
+                        <el-tag
+                          v-if="getRemainingRestDays(person.id) !== null"
+                          size="small"
+                          :type="getRemainingRestDays(person.id)! > 0 ? 'success' : getRemainingRestDays(person.id)! === 0 ? 'warning' : 'danger'"
+                        >
+                          剩余 {{ getRemainingRestDays(person.id) }} 天
+                        </el-tag>
+                      </div>
+                    </div>
+                    <div class="header-actions">
+                      <div class="card-actions">
+                        <el-dropdown
+                          trigger="click"
+                          :hide-on-click="false"
+                          @visible-change="handleDropdownVisibleChange()"
+                        >
+                          <el-button
+                            text
+                            size="small"
+                            :disabled="availablePeople.length === 0"
+                          >
+                            <span class="dropdown-person-option">
+                              <!-- <span class="color-dot" :style="{ backgroundColor: person.color }" /> -->
+                              <span>切换</span>
+                            </span>
+                            <el-icon class="caret"><ArrowDown /></el-icon>
+                          </el-button>
+                          <template #dropdown>
+                            <el-dropdown-menu v-if="availablePeople.length > 0">
+                              <el-dropdown-item
+                                v-for="candidate in availablePeople"
+                                :key="candidate.id"
+                                :disabled="candidate.id === person.id"
+                                @click="
+                                  replacePersonCard(person.id, candidate.id)
+                                "
+                              >
+                                <span class="dropdown-person-option">
+                                  <span
+                                    class="color-dot"
+                                    :style="{
+                                      backgroundColor: candidate.color,
+                                    }"
+                                  />
+                                  <span>{{ candidate.name }}</span>
+                                </span>
+                              </el-dropdown-item>
+                            </el-dropdown-menu>
+                          </template>
+                        </el-dropdown>
+                        <el-button
+                          text
+                          size="small"
+                          type="danger"
+                          @click.stop="removePersonCard(person.id)"
+                          >移除</el-button
+                        >
+                        <el-tooltip content="清空该人员当月排班" placement="top">
+                          <el-button
+                            text
+                            size="small"
+                            type="danger"
+                            :disabled="isPersonClearing(person.id)"
+                            @click.stop="handleClearPersonSchedules(person)"
+                          >
+                            清空当月
+                          </el-button>
+                        </el-tooltip>
+                      </div>
+                    </div>
+                  </div>
+                </template>
+                <template #date-cell="{ data }">
+                  <div
+                    class="calendar-date-cell"
+                    :class="{ 'is-outside-month': !isCurrentMonthDate(data.day) }"
+                    @click="handleCellClick(person.id, data.day, $event)"
+                  >
+                    <div class="date-top">
+                      <span
+                        class="day"
+                        :class="{ 'is-weekend': isWeekend(data.day) }"
+                        >{{ formatMonthDay(data.day) }}</span
+                      >
+                      <!-- <span
+                        class="weekday"
+                        :class="{ 'is-weekend': isWeekend(data.day) }"
+                      >{{ getWeekdayLabel(data.day) }}</span> -->
+                    </div>
+                    <div class="date-content">
+                      <template v-if="getSchedule(person.id, data.day)">
+                        <el-tag
+                          size="default"
+                          class="shift-tag"
+                          disable-transitions
+                          closable
+                          :style="getShiftTagStyle(getSchedule(person.id, data.day)!.shiftId)"
+                          @close.stop="removeSchedule(person.id, data.day)"
+                        >
+                          {{
+                            getShiftName(
+                              getSchedule(person.id, data.day)!.shiftId
+                            )
+                          }}
+                        </el-tag>
+                      </template>
+                      <template v-else>
+                        <span class="placeholder">未排班</span>
+                      </template>
+                    </div>
+                    <!-- <div class="cell-actions">
+                      <el-button
+                        text
+                        type="primary"
+                        size="small"
+                        @click.stop="
+                          handleCellClick(person.id, data.day, $event)
+                        "
+                        >点击进行排班</el-button
+                      >
+                    </div> -->
+                  </div>
+                </template>
+              </el-calendar>
+            </div>
+          </template>
+        </draggable>
+        <div v-if="selectedPersonIds.length !== 4" class="empty-state">
+          <el-empty :image-size="120">
+            <template #description>
+              <el-dropdown
+                trigger="click"
+                :disabled="availablePeople.length === 0"
+                @command="addPersonById"
+              >
+                <el-button type="primary" size="small" :icon="Plus"
+                  >点击选择人员</el-button
+                >
+                <template #dropdown>
+                  <el-dropdown-menu v-if="availablePeople.length > 0">
+                    <el-dropdown-item
+                      v-for="person in availablePeople"
+                      :key="person.id"
+                      :command="person.id"
+                    >
+                      <span class="dropdown-person-option">
+                        <span
+                          class="color-dot"
+                          :style="{ backgroundColor: person.color }"
+                        />
+                        <span>{{ person.name }}</span>
+                      </span>
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+            </template>
+          </el-empty>
+        </div>
+      </div>
+    </el-scrollbar>
+
+    <el-popover
+      v-model:visible="quickSelect.visible"
+      trigger="manual"
+      placement="bottom"
+      width="220"
+      :virtual-triggering="true"
+      :virtual-ref="quickSelect.triggerEl"
+      @hide="closeQuickSelect"
+    >
+      <template #default>
+        <div class="quick-select">
+          <div class="quick-select__title">选择班次</div>
+          <el-scrollbar max-height="200px">
+            <el-button
+              v-for="shift in shifts"
+              :key="shift.id"
+              text
+              :style="{ justifyContent: 'flex-start', width: '100%' }"
+              @click="handleQuickSelectShift(shift.id)"
+            >
+              <span
+                class="color-dot"
+                :style="{ backgroundColor: shift.color }"
+              />
+              <span class="quick-select__name">{{ shift.name }}</span>
+              <el-tag
+                v-if="shift.isRest"
+                size="small"
+                type="warning"
+                effect="plain"
+                >休</el-tag
+              >
+            </el-button>
+          </el-scrollbar>
+        </div>
+      </template>
+    </el-popover>
+  </div>
+</template>
+
+<script setup lang="ts">
+import {
+  computed,
+  nextTick,
+  onBeforeUnmount,
+  onMounted,
+  reactive,
+  ref,
+  toRef,
+  watch,
+} from "vue";
+import { ElMessage, ElMessageBox } from "element-plus";
+import { Plus, ArrowDown } from "@element-plus/icons-vue";
+import draggable from "vuedraggable";
+import dayjs from "dayjs";
+import type { Person, Schedule, Shift } from "@/types";
+import { repositories } from "@/repositories";
+import {
+  getAdaptiveTextColor,
+  getNextMonth,
+  getPreviousMonth,
+} from "@/utils";
+
+const props = withDefaults(
+  defineProps<{
+    currentMonth?: string | null;
+  }>(),
+  {
+    currentMonth: null,
+  }
+);
+
+const emit = defineEmits<{
+  (e: "update:current-month", value: string): void;
+}>();
+
+const SELECTED_PERSON_IDS_KEY = "person_calendar_selected_ids";
+
+const getInitialSelectedPersonIds = () => {
+  if (typeof window === "undefined") return [];
+  try {
+    const saved = localStorage.getItem(SELECTED_PERSON_IDS_KEY);
+    if (!saved) return [];
+    const parsed = JSON.parse(saved);
+    return Array.isArray(parsed) ? parsed.slice(0, 4) : [];
+  } catch (error) {
+    console.warn("[person-calendar] Failed to parse saved selection", error);
+    return [];
+  }
+};
+
+const persistSelectedPersonIds = (ids: string[]) => {
+  if (typeof window === "undefined") return;
+  localStorage.setItem(SELECTED_PERSON_IDS_KEY, JSON.stringify(ids));
+};
+
+const currentMonth = toRef(props, "currentMonth");
+const people = ref<Person[]>([]);
+const shifts = ref<Shift[]>([]);
+const schedules = ref<Schedule[]>([]);
+const loading = ref(false);
+const selectedPersonIds = ref<string[]>(getInitialSelectedPersonIds());
+const calendarWrapperRef = ref<HTMLElement | null>(null);
+const wrapperWidth = ref(0);
+const personClearingMap = reactive<Record<string, boolean>>({});
+
+const TWO_COL_THRESHOLD = 1800;
+let resizeObserver: ResizeObserver | null = null;
+
+const quickSelect = reactive<{
+  visible: boolean;
+  personId: string;
+  date: string;
+  triggerEl: HTMLElement | null;
+}>({
+  visible: false,
+  personId: "",
+  date: "",
+  triggerEl: null,
+});
+
+const calendarAnchor = computed(() =>
+  dayjs(`${currentMonth.value}-01`).toDate()
+);
+const calendarRange = computed(() => {
+  const anchor = dayjs(`${currentMonth.value}-01`);
+  const start = anchor.subtract(1, "month").startOf("month");
+  const end = anchor.add(1, "month").endOf("month");
+  return [start.toDate(), end.toDate()] as [Date, Date];
+});
+
+const monthLabel = computed(() =>
+  dayjs(`${currentMonth.value}-01`).format("YYYY年MM月")
+);
+
+const shiftMap = computed(() => {
+  const map = new Map<string, Shift>();
+  shifts.value.forEach((shift) => map.set(shift.id, shift));
+  return map;
+});
+
+const scheduleMap = computed(() => {
+  const map = new Map<string, Schedule>();
+  schedules.value.forEach((schedule) => {
+    map.set(`${schedule.personId}-${schedule.date}`, schedule);
+  });
+  return map;
+});
+
+const selectedPeople = computed(() =>
+  selectedPersonIds.value
+    .map((id) => people.value.find((p) => p.id === id))
+    .filter((p): p is Person => Boolean(p))
+);
+
+const availablePeople = computed(() =>
+  people.value.filter((p) => !selectedPersonIds.value.includes(p.id))
+);
+
+const layoutClass = computed<"flex-single-col" | "flex-two-cols">(() => {
+  const count = selectedPeople.value.length;
+  if (count <= 1) {
+    return "flex-single-col";
+  }
+
+  if (!wrapperWidth.value) {
+    return "flex-single-col";
+  }
+
+  return wrapperWidth.value >= TWO_COL_THRESHOLD
+    ? "flex-two-cols"
+    : "flex-single-col";
+});
+
+const getRemainingRestDays = (personId: string): number | null => {
+  const person = people.value.find((p) => p.id === personId);
+  if (!person || !person.baseRestDays) return null;
+
+  // 统计当月已使用的休息天数
+  const usedRestDays = schedules.value.filter((schedule) => {
+    if (schedule.personId !== personId) return false;
+    if (schedule.month !== currentMonth.value) return false;
+    const shift = shiftMap.value.get(schedule.shiftId);
+    return shift?.isRest === true;
+  }).length;
+
+  return person.baseRestDays - usedRestDays;
+};
+
+const handleDragUpdate = (newPeople: Person[]) => {
+  selectedPersonIds.value = newPeople.map((p) => p.id);
+};
+
+const loadBaseData = async () => {
+  const [peopleData, shiftData] = await Promise.all([
+    repositories.people.getAll(),
+    repositories.shifts.getAll(),
+  ]);
+
+  const sortFn = <T extends { order?: number }>(a: T, b: T) =>
+    (a.order ?? 999) - (b.order ?? 999);
+
+  people.value = [...peopleData].sort(sortFn);
+  shifts.value = [...shiftData].sort(sortFn);
+
+  selectedPersonIds.value = selectedPersonIds.value
+    .filter((id) => people.value.some((p) => p.id === id))
+    .slice(0, 4);
+};
+
+const loadSchedules = async () => {
+  if (!currentMonth.value) return;
+  
+  const targetMonths = [
+    getPreviousMonth(currentMonth.value),
+    currentMonth.value,
+    getNextMonth(currentMonth.value),
+  ];
+
+  const results = await Promise.all(
+    targetMonths.map((month) => repositories.schedules.getByMonth(month))
+  );
+
+  schedules.value = results.flat();
+};
+
+const loadData = async () => {
+  loading.value = true;
+  try {
+    await loadBaseData();
+    await loadSchedules();
+  } catch (error) {
+    console.error("加载人员或班次失败", error);
+    ElMessage.error("加载失败，请稍后再试");
+  } finally {
+    loading.value = false;
+  }
+};
+
+const setMonth = async (month: string) => {
+  if (!month || month === currentMonth.value) return;
+  emit("update:current-month", month);
+};
+
+const getSchedule = (personId: string, date: string) => {
+  return scheduleMap.value.get(`${personId}-${date}`) || null;
+};
+
+const getShiftName = (shiftId: string) =>
+  shiftMap.value.get(shiftId)?.name || "未知班次";
+
+const getShiftColor = (shiftId: string) =>
+  shiftMap.value.get(shiftId)?.color || "#409EFF";
+
+const getShiftTagStyle = (shiftId: string) => {
+  const backgroundColor = getShiftColor(shiftId);
+  const textColor = getAdaptiveTextColor(backgroundColor);
+  return {
+    backgroundColor,
+    color: textColor,
+    borderColor: "transparent",
+    "--shift-tag-text-color": textColor,
+  };
+};
+
+const formatMonthDay = (date: string) => dayjs(date).format("MM-DD");
+
+const isCurrentMonthDate = (date: string) =>
+  currentMonth.value && dayjs(date).format("YYYY-MM") === currentMonth.value;
+
+const isWeekend = (date: string) => {
+  const day = dayjs(date).day();
+  return day === 0 || day === 6;
+};
+
+const ensureNoConflict = async (
+  personId: string,
+  date: string,
+  targetShiftId: string
+) => {
+  const existing = getSchedule(personId, date);
+  if (!existing) return null;
+
+  if (existing.shiftId === targetShiftId) {
+    ElMessage.info("该日期已是此班次");
+    throw new Error("same-shift");
+  }
+
+  // await ElMessageBox.confirm("该日期已有班次，是否替换为新班次？", "提示", {
+  //   confirmButtonText: "替换",
+  //   cancelButtonText: "取消",
+  //   type: "warning",
+  // });
+
+  return existing;
+};
+
+const assignShiftToPerson = async (
+  personId: string,
+  shiftId: string,
+  date: string
+) => {
+  try {
+    let existingSchedule: Schedule | null = null;
+
+    try {
+      existingSchedule = await ensureNoConflict(personId, date, shiftId);
+    } catch (error: any) {
+      if (error?.message === "same-shift") {
+        return;
+      }
+      throw error;
+    }
+
+    if (existingSchedule) {
+      await repositories.schedules.update(existingSchedule.id, {
+        shiftId,
+      });
+      ElMessage.success("已更新班次");
+    } else {
+      await repositories.schedules.create({
+        personId,
+        shiftId,
+        date,
+        month: date.slice(0, 7),
+        order: 1,
+      });
+      ElMessage.success("排班成功");
+    }
+
+    await loadSchedules();
+  } catch (error: any) {
+    if (error === "cancel") return;
+    console.error("排班失败", error);
+    ElMessage.error("排班失败，请稍后再试");
+  }
+};
+
+const removeSchedule = async (personId: string, date: string) => {
+  const schedule = getSchedule(personId, date);
+  if (!schedule) return;
+
+  try {
+    await repositories.schedules.delete(schedule.id);
+    ElMessage.success("已删除排班");
+    await loadSchedules();
+  } catch (error) {
+    console.error("删除排班失败", error);
+    ElMessage.error("删除排班失败，请稍后再试");
+  }
+};
+
+const handleCellClick = (personId: string, date: string, event: Event) => {
+  quickSelect.personId = personId;
+  quickSelect.date = date;
+  quickSelect.triggerEl = event.currentTarget as HTMLElement;
+  quickSelect.visible = true;
+};
+
+const closeQuickSelect = () => {
+  quickSelect.visible = false;
+  quickSelect.personId = "";
+  quickSelect.date = "";
+  quickSelect.triggerEl = null;
+};
+
+const handleQuickSelectShift = async (shiftId: string) => {
+  if (!quickSelect.personId || !quickSelect.date) return;
+  await assignShiftToPerson(quickSelect.personId, shiftId, quickSelect.date);
+  closeQuickSelect();
+};
+
+const addPersonById = (personId: string) => {
+  if (!personId) return;
+  if (selectedPersonIds.value.includes(personId)) {
+    ElMessage.warning("该人员已在列表中");
+    return;
+  }
+  if (selectedPersonIds.value.length >= 4) {
+    ElMessage.warning("最多选择 4 人");
+    return;
+  }
+  selectedPersonIds.value = [...selectedPersonIds.value, personId];
+};
+
+const removePersonCard = (personId: string) => {
+  selectedPersonIds.value = selectedPersonIds.value.filter(
+    (id) => id !== personId
+  );
+};
+
+const replacePersonCard = (targetId: string, newId: string) => {
+  if (targetId === newId) return;
+  if (selectedPersonIds.value.includes(newId)) {
+    ElMessage.warning("该人员已在列表中");
+    return;
+  }
+  selectedPersonIds.value = selectedPersonIds.value.map((id) =>
+    id === targetId ? newId : id
+  );
+};
+
+const isPersonClearing = (personId: string) => personClearingMap[personId] === true;
+
+const handleClearPersonSchedules = async (person: Person) => {
+  if (!currentMonth.value) {
+    ElMessage.warning("请选择要清空的月份");
+    return;
+  }
+
+  try {
+    await ElMessageBox.confirm(
+      `确认 <strong style="color: var(--el-color-danger);">清空 ${person.name} 在 ${currentMonth.value} 的所有排班</strong>？<br/>此操作 <strong style="color: var(--el-color-danger);">不可恢复</strong>！`,
+      "清空个人排班",
+      {
+        confirmButtonText: "确认清空",
+        cancelButtonText: "取消",
+        type: "warning",
+        confirmButtonClass: "el-button--danger",
+        cancelButtonClass: "el-button--primary",
+        dangerouslyUseHTMLString: true,
+      }
+    );
+  } catch {
+    return;
+  }
+
+  personClearingMap[person.id] = true;
+  try {
+    const personSchedules = await repositories.schedules.getByPersonAndMonth(
+      person.id,
+      currentMonth.value
+    );
+
+    if (personSchedules.length === 0) {
+      ElMessage.info(`${person.name} 在当前月份暂无排班`);
+      return;
+    }
+
+    await Promise.all(
+      personSchedules.map((schedule) => repositories.schedules.delete(schedule.id))
+    );
+
+    ElMessage.success(`已清空 ${person.name} 在当前月的排班`);
+    await loadSchedules();
+  } catch (error) {
+    console.error("清空个人排班失败", error);
+    ElMessage.error("清空个人排班失败，请稍后重试");
+  } finally {
+    personClearingMap[person.id] = false;
+  }
+};
+
+const handleDropdownVisibleChange = () => (visible: boolean) => {
+  if (!visible) return;
+  // 预留用于下拉菜单的扩展处理
+};
+
+const updateWrapperWidth = () => {
+  if (calendarWrapperRef.value) {
+    wrapperWidth.value = calendarWrapperRef.value.clientWidth;
+  }
+};
+
+const setupResizeObserver = () => {
+  resizeObserver?.disconnect?.();
+
+  if (!calendarWrapperRef.value) {
+    return;
+  }
+
+  updateWrapperWidth();
+
+  if (typeof ResizeObserver === "undefined") return;
+
+  resizeObserver = new ResizeObserver((entries) => {
+    const entry = entries[0];
+    if (entry) {
+      wrapperWidth.value = entry.contentRect.width;
+    }
+  });
+
+  resizeObserver.observe(calendarWrapperRef.value);
+};
+
+onMounted(() => {
+  loadData();
+  nextTick(() => {
+    setupResizeObserver();
+  });
+});
+
+watch(
+  currentMonth,
+  async (newMonth) => {
+    if (newMonth) {
+      await loadSchedules();
+    }
+  }
+);
+
+onBeforeUnmount(() => {
+  resizeObserver?.disconnect?.();
+  resizeObserver = null;
+});
+
+watch(
+  () => calendarWrapperRef.value,
+  () => {
+    nextTick(() => {
+      setupResizeObserver();
+    });
+  }
+);
+
+watch(
+  selectedPersonIds,
+  (val) => {
+    persistSelectedPersonIds(val);
+  },
+  { deep: false }
+);
+
+defineExpose({
+  currentMonth,
+  setMonth,
+  loadData,
+});
+</script>
+
+<style lang="scss" scoped>
+.person-calendar-view {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  height: calc(100vh - 130px);
+}
+
+.content-scrollbar {
+  flex: 1;
+  min-height: 0;
+}
+
+.content {
+  min-width: 0;
+  padding: 8px;
+}
+
+/* 布局相关 */
+.calendar-flex {
+  display: flex;
+  gap: 16px;
+  min-height: 100%;
+
+  &.flex-single-col {
+    flex-direction: column;
+  }
+
+  &.flex-two-cols {
+    flex-wrap: wrap;
+
+    .calendar-card {
+      width: calc(50% - 8px);
+      min-width: 900px;
+      flex: 1 1 calc(50% - 8px);
+    }
+  }
+}
+
+/* 日历卡片 */
+.calendar-card {
+  display: flex;
+  flex-direction: column;
+  background-color: var(--el-bg-color);
+  border-radius: 8px;
+  overflow: hidden;
+  box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
+  transition: all 0.3s;
+  min-width: 900px;
+  width: 100%;
+
+  &:hover {
+    box-shadow: 0 4px 16px 0 rgba(0, 0, 0, 0.15);
+  }
+}
+
+.calendar-card__header {
+  width: 100%;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 16px 20px;
+  // background: var(--el-fill-color-light);
+  border-bottom: 1px solid var(--el-border-color);
+  transition: all 0.3s ease;
+
+  &.drag-handle {
+    cursor: move;
+    cursor: grab;
+    user-select: none;
+
+    &:active {
+      cursor: grabbing;
+    }
+
+    &:hover {
+      background: var(--el-fill-color);
+    }
+  }
+
+  .person-meta {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    flex: 1;
+
+    .person-name {
+      font-weight: 600;
+      color: var(--el-text-color-primary);
+      font-size: 16px;
+      line-height: 1.4;
+    }
+
+    .person-meta__sub {
+      font-size: 13px;
+      color: var(--el-text-color-secondary);
+      margin-top: 2px;
+      font-weight: 500;
+    }
+
+    .rest-days-tags {
+      display: flex;
+      gap: 6px;
+      flex-direction: column;
+      flex-wrap: wrap;
+    }
+  }
+
+  .header-actions {
+    display: flex;
+    align-items: center;
+  }
+
+  .card-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+}
+
+/* 颜色点 */
+.color-dot {
+  display: inline-block;
+  width: 12px;
+  height: 12px;
+  border-radius: 50%;
+  flex-shrink: 0;
+  margin-right: 8px;
+}
+
+.dropdown-person-option {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+/* 日历单元格 */
+.calendar-date-cell {
+  min-height: 50px;
+  display: flex;
+  flex-direction: column;
+  padding: 8px;
+  gap: 6px;
+  cursor: pointer;
+  border-radius: 6px;
+  transition: all 0.3s;
+  background-color: var(--el-fill-color-light);
+  border: 1px dashed var(--el-border-color);
+
+  &:hover {
+    background-color: var(--el-color-primary-light-9);
+    border-color: var(--el-color-primary);
+
+    .cell-actions {
+      opacity: 1;
+    }
+  }
+
+  &.is-outside-month {
+    opacity: 0.35;
+
+    .day {
+      color: var(--el-text-color-disabled);
+    }
+  }
+}
+
+.date-top {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 8px;
+  margin-bottom: 4px;
+
+  .day {
+    font-size: 16px;
+    font-weight: 600;
+    color: var(--el-text-color-primary);
+    line-height: 1;
+    &.is-weekend {
+      color: var(--el-color-warning);
+      font-weight: 600;
+    }
+  }
+
+  // .weekday {
+  //   font-size: 12px;
+  //   // color: var(--el-text-color-secondary);
+  //   font-weight: 500;
+
+  //   &.is-weekend {
+  //     color: var(--el-color-warning);
+  //     font-weight: 600;
+  //   }
+  // }
+}
+
+.date-content {
+  flex: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px 0;
+  min-height: 32px;
+
+  .shift-tag {
+    font-weight: 500;
+    font-size: 13px;
+    padding: 4px 10px;
+    border-radius: 4px;
+    border-color: transparent;
+    min-width: 88px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    color: var(--shift-tag-text-color, var(--el-color-white));
+
+    :deep(.el-tag__close) {
+      color: inherit;
+    }
+  }
+
+  .placeholder {
+    font-size: 12px;
+    color: var(--el-text-color-secondary);
+    opacity: 0.6;
+  }
+}
+
+.cell-actions {
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  display: flex;
+  justify-content: center;
+  padding-top: 4px;
+
+  .el-button {
+    font-size: 12px;
+    padding: 4px 8px;
+    height: auto;
+  }
+}
+
+/* 空状态 */
+.empty-state {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 200px;
+  padding: 32px;
+  background: var(--el-fill-color-light);
+  border: 1px dashed var(--el-border-color);
+  border-radius: 8px;
+  margin: 16px 0;
+}
+
+/* 快速选择弹窗 */
+.quick-select {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 8px;
+
+  &__title {
+    font-weight: 600;
+    margin-bottom: 8px;
+    color: var(--el-text-color-primary);
+    padding-left: 4px;
+    font-size: 14px;
+  }
+
+  .el-button {
+    gap: 8px;
+    margin-left: 0 !important;
+    justify-content: flex-start;
+    padding: 8px 12px;
+    border-radius: 6px;
+    transition: all 0.3s;
+
+    &:hover {
+      background-color: var(--el-fill-color-light);
+      color: var(--el-color-primary);
+    }
+  }
+
+  .quick-select__name {
+    flex: 1;
+    text-align: left;
+    font-size: 14px;
+  }
+}
+
+/* 动画效果 */
+.fade-enter-active,
+.fade-leave-active {
+  transition: all 0.3s cubic-bezier(0.55, 0, 0.1, 1);
+}
+
+.fade-enter-from,
+.fade-leave-to {
+  opacity: 0;
+  transform: translateY(20px);
+}
+
+/* 拖拽状态样式 */
+.ghost-card {
+  opacity: 0.4;
+  background: var(--el-fill-color-light);
+  border: 2px dashed var(--el-color-primary);
+
+  .calendar-card__header {
+    background: transparent;
+  }
+
+  * {
+    visibility: hidden;
+  }
+}
+
+.chosen-card {
+  box-shadow: 0 8px 24px 0 rgba(0, 0, 0, 0.2);
+  transform: scale(1.02);
+
+  .calendar-card__header {
+    background: var(--el-color-primary-light-9);
+    border-color: var(--el-color-primary);
+  }
+}
+
+.drag-card {
+  opacity: 0.9;
+  transform: rotate(3deg);
+  box-shadow: 0 12px 32px 0 rgba(0, 0, 0, 0.25);
+  cursor: grabbing !important;
+
+  .calendar-card__header {
+    cursor: grabbing !important;
+  }
+}
+
+/* Element Plus 日历组件样式覆盖 */
+:deep(.el-calendar) {
+  --el-calendar-border: 1px solid var(--el-border-color);
+  background-color: transparent;
+}
+
+:deep(.el-calendar__header) {
+  padding: 16px 10px;
+  border-bottom: none;
+}
+
+:deep(.el-calendar__body) {
+  padding: 12px;
+}
+
+:deep(.el-calendar-table) {
+  thead th {
+    font-weight: 600;
+    color: var(--el-text-color-regular);
+    padding: 12px 8px;
+    font-size: 13px;
+    background-color: var(--el-fill-color-light);
+    border: 1px solid var(--el-border-color);
+  }
+
+  td {
+    border: 1px solid var(--el-border-color);
+    padding: 4px;
+    transition: all 0.3s;
+
+    &.is-selected {
+      background-color: var(--el-color-primary-light-9);
+    }
+  }
+
+  .el-calendar-day {
+    padding: 0;
+    height: 100%;
+  }
+}
+</style>
