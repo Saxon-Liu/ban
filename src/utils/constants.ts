@@ -36,21 +36,25 @@ export const DEFAULT_COLORS = [
  */
 export const DEFAULT_SHIFTS = [
   {
+    id: 'shift-default-morning',
     name: '早班',
     color: '#FF6B6B',
     isRest: false,
   },
   {
+    id: 'shift-default-normal',
     name: '正常班',
     color: '#45B7D1',
     isRest: false,
   },
   {
+    id: 'shift-default-afternoon',
     name: '下午班',
     color: '#4ECDC4',
     isRest: false,
   },
   {
+    id: 'shift-default-rest',
     name: '休',
     color: '#96CEB4',
     isRest: true,
