@@ -108,3 +108,30 @@ export function throttle<T extends (...args: any[]) => any>(
     }
   } as T
 }
+
+/**
+ * 根据背景色自动计算可读的文字颜色
+ * 使用亮度公式返回深色或浅色文本
+ */
+export function getAdaptiveTextColor(bgColor: string): string {
+  try {
+    const hex = bgColor.replace('#', '')
+    const normalizedHex =
+      hex.length === 3
+        ? hex
+            .split('')
+            .map((c) => c + c)
+            .join('')
+        : hex
+
+    const bigint = parseInt(normalizedHex, 16)
+    const r = (bigint >> 16) & 255
+    const g = (bigint >> 8) & 255
+    const b = bigint & 255
+    const brightness = (r * 299 + g * 587 + b * 114) / 1000
+    return brightness > 186 ? '#000' : '#fff'
+  } catch (error) {
+    console.error('[adaptive-color-error]', error)
+    return '#fff'
+  }
+}

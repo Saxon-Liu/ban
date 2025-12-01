@@ -4,7 +4,15 @@
  */
 
 // 通用工具函数
-export { generateId, getCurrentDateTime, formatDate, deepClone, debounce, throttle } from './common'
+export {
+  generateId,
+  getCurrentDateTime,
+  formatDate,
+  deepClone,
+  debounce,
+  throttle,
+  getAdaptiveTextColor,
+} from './common'
 
 // 日期工具函数
 export { 

@@ -141,9 +141,23 @@ const handleFileChange = async (event: Event) => {
   } catch (error: any) {
     if (error !== "cancel") {
       console.error("导入配置失败:", error);
-      ElMessage.error("导入配置失败: " + (error.message || "未知错误"));
+      const errorMsg = error.message || "未知错误";
+      ElMessage.error({
+        message: `导入配置失败: ${errorMsg}`,
+        duration: 5000,
+        showClose: true,
+      });
     }
   }
+};
+
+/**
+ * 将字符串时间戳转换为 Date 对象
+ */
+const parseTimestamp = (value: any): Date => {
+  if (value instanceof Date) return value;
+  if (typeof value === 'string') return new Date(value);
+  return getCurrentDateTime();
 };
 
 /**
@@ -159,37 +173,62 @@ const importData = async (data: any) => {
     'readwrite'
   );
 
-  const promises: Promise<any>[] = [];
-
   // 导入人员
   if (Array.isArray(people)) {
     for (const p of people) {
-      // 确保有更新时间
-      const item = { ...p, updatedAt: now };
-      if (!item.createdAt) item.createdAt = now;
-      promises.push(transaction.objectStore('people').put(item));
+      // 验证必要字段
+      if (!p.id || !p.name) {
+        console.warn('跳过无效人员数据:', p);
+        continue;
+      }
+      
+      const item = {
+        ...p,
+        createdAt: parseTimestamp(p.createdAt),
+        updatedAt: now,
+      };
+      transaction.objectStore('people').put(item);
     }
   }
 
   // 导入班次
   if (Array.isArray(shifts)) {
     for (const s of shifts) {
-      const item = { ...s, updatedAt: now };
-      if (!item.createdAt) item.createdAt = now;
-      promises.push(transaction.objectStore('shifts').put(item));
+      // 验证必要字段
+      if (!s.id || !s.name) {
+        console.warn('跳过无效班次数据:', s);
+        continue;
+      }
+      
+      const item = {
+        ...s,
+        createdAt: parseTimestamp(s.createdAt),
+        updatedAt: now,
+      };
+      transaction.objectStore('shifts').put(item);
     }
   }
 
   // 导入额外休息配置
   if (Array.isArray(extraRestConfigs)) {
     for (const c of extraRestConfigs) {
-      const item = { ...c, updatedAt: now };
-      if (!item.createdAt) item.createdAt = now;
-      promises.push(transaction.objectStore('extraRestConfigs').put(item));
+      // 验证必要字段
+      if (!c.id || typeof c.year !== 'number' || typeof c.month !== 'number') {
+        console.warn('跳过无效额外休息配置:', c);
+        continue;
+      }
+      
+      const item = {
+        ...c,
+        createdAt: parseTimestamp(c.createdAt),
+        updatedAt: now,
+      };
+      transaction.objectStore('extraRestConfigs').put(item);
     }
   }
 
-  await Promise.all([...promises, transaction.done]);
+  // 只需等待事务完成
+  await transaction.done;
 };
 </script>
 
