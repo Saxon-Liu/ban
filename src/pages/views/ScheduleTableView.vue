@@ -752,7 +752,13 @@ const handleCellDrop = async (
     if ((shift as any)?.isRest === true) {
       const person = people.value.find((p) => p.id === dragData.personId);
       if (person) {
-        const stats = calculatePersonStatistics(person.id, currentMonth.value);
+        const monthValue = currentMonth.value;
+        if (!monthValue) {
+          ElMessage.warning("尚未选择月份，无法计算剩余休息天数");
+          handleDragEnd();
+          return;
+        }
+        const stats = calculatePersonStatistics(person.id, monthValue);
         if (stats && stats.remainingRestDays <= 0) {
           try {
             await ElMessageBox.confirm(
