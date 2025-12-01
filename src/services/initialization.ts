@@ -3,7 +3,8 @@
  * 负责系统初始化时的默认数据创建
  */
 
-import { repositories } from '@/repositories'
+import { dbManager } from '@/repositories/IndexedDBManager'
+import { getCurrentDateTime } from '@/utils/common'
 import { DEFAULT_SHIFTS } from '@/utils/constants'
 
 /**
@@ -12,30 +13,27 @@ import { DEFAULT_SHIFTS } from '@/utils/constants'
  */
 export async function initializeDefaultShifts(): Promise<void> {
   try {
-    const existingShifts = await repositories.shifts.getAll()
-    console.log('班次数据检查:', {
-      总班次数量: existingShifts.length,
-      有效班次数量: existingShifts.filter(s => s && s.name && s.color).length
-    })
-    if (existingShifts.length === 0) {
+    const db = await dbManager.getDB()
+    const count = await db.count('shifts')
+    console.log('班次数据检查:', { 总班次数量: count })
+    if (count === 0) {
       console.log('无班次数据，开始初始化默认班次...')
-      for (const shift of DEFAULT_SHIFTS) {
-        try {
-          const newShift = await repositories.shifts.create({
+      const now = getCurrentDateTime()
+      const tx = db.transaction('shifts', 'readwrite')
+      await Promise.all(
+        DEFAULT_SHIFTS.map((shift, index) =>
+          tx.store.add({
+            id: shift.id,
             name: shift.name,
             color: shift.color,
-            isRest: shift.isRest
+            isRest: shift.isRest,
+            order: index + 1,
+            createdAt: now,
+            updatedAt: now,
           })
-          console.log('创建班次成功:', { name: newShift.name, id: newShift.id })
-        } catch (error: any) {
-          console.error('[initializeDefaultShifts-error]', {
-            time: new Date().toISOString(),
-            params: { name: shift.name, color: shift.color, isRest: shift.isRest },
-            message: error?.message,
-            stack: error?.stack,
-          })
-        }
-      }
+        )
+      )
+      await tx.done
       console.log('默认班次初始化完成')
     } else {
       console.log('已有班次数据，跳过默认班次初始化')

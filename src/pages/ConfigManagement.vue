@@ -13,12 +13,15 @@
             <h3>导出配置</h3>
             <p>将当前的人员、班次和额外休息配置导出为JSON文件进行备份。</p>
           </div>
-          <el-button type="primary" @click="handleExport">
-            导出配置
-          </el-button>
+          <div class="action-controls">
+            <el-button type="primary" @click="handleExport">
+              导出配置
+            </el-button>
+            <el-checkbox v-model="exportSchedules" class="export-option">
+              同时导出排班记录
+            </el-checkbox>
+          </div>
         </div>
-
-        <div class="divider"></div>
 
         <div class="action-item">
           <div class="action-info">
@@ -27,6 +30,19 @@
           </div>
           <el-button type="warning" @click="handleImport">
             导入配置
+          </el-button>
+        </div>
+
+        <div class="action-item danger">
+          <div class="action-info">
+            <h3>初始化系统（高危）</h3>
+            <p>
+              该操作将删除所有数据（人员、班次、排班、配置）并重新加载默认班次。
+              <strong>请先导出配置备份！</strong>
+            </p>
+          </div>
+          <el-button type="danger" plain @click="handleReinitialize" :loading="reinitializing">
+            初始化系统
           </el-button>
         </div>
       </div>
@@ -48,27 +64,68 @@ import { ElMessage, ElMessageBox } from "element-plus";
 import { repositories } from "@/repositories";
 import { dbManager } from "@/repositories/IndexedDBManager";
 import { getCurrentDateTime } from "@/utils/common";
+import { initializeDefaultShifts } from "@/services/initialization";
+import { DEFAULT_SHIFTS } from "@/utils";
+import type { Shift, Schedule } from "@/types";
 
 const fileInput = ref<HTMLInputElement | null>(null);
+const reinitializing = ref(false);
+const exportSchedules = ref(true);
+
+const normalizeShifts = (shifts: Shift[] = []) => {
+  const defaultRestShift = DEFAULT_SHIFTS.find((shift) => shift.isRest);
+  const dedupMap = new Map<string, Shift>();
+
+  for (const shift of shifts) {
+    const normalized: Shift = { ...shift } as Shift;
+    if (shift.isRest) {
+      if (defaultRestShift) {
+        normalized.id = defaultRestShift.id;
+        normalized.name = shift.name || defaultRestShift.name;
+        normalized.color = shift.color || defaultRestShift.color;
+      }
+      normalized.isRest = true;
+    }
+
+    if (dedupMap.has(normalized.id)) {
+      dedupMap.set(normalized.id, { ...dedupMap.get(normalized.id)!, ...normalized });
+    } else {
+      dedupMap.set(normalized.id, normalized);
+    }
+  }
+
+  return Array.from(dedupMap.values());
+};
 
 /**
  * 导出配置
  */
 const handleExport = async () => {
   try {
-    const [people, shifts, extraRestConfigs] = await Promise.all([
+    const [people, shifts, extraRestConfigs, scheduleData] = await Promise.all([
       repositories.people.getAll(),
       repositories.shifts.getAll(),
       repositories.extraRestConfigs.getAll(),
+      exportSchedules.value ? repositories.schedules.getAll() : Promise.resolve([]),
     ]);
+
+    const normalizedShifts = normalizeShifts(shifts as Shift[]);
+    const normalizedSchedules = exportSchedules.value
+      ? (scheduleData as Schedule[]).map((schedule) => ({
+          ...schedule,
+          createdAt: schedule.createdAt?.toString?.() ?? schedule.createdAt,
+          updatedAt: schedule.updatedAt?.toString?.() ?? schedule.updatedAt,
+        }))
+      : undefined;
 
     const configData = {
       version: "1.0",
       timestamp: new Date().toISOString(),
       data: {
         people,
-        shifts,
+        shifts: normalizedShifts,
         extraRestConfigs,
+        schedules: normalizedSchedules,
       },
     };
 
@@ -91,6 +148,38 @@ const handleExport = async () => {
   } catch (error: any) {
     console.error("导出配置失败:", error);
     ElMessage.error("导出配置失败: " + (error.message || "未知错误"));
+  }
+};
+
+const handleReinitialize = async () => {
+  try {
+    await ElMessageBox.confirm(
+      `确认 <strong style="color: var(--el-color-danger);">删除所有数据并重新初始化系统</strong>？<br/>该操作 <strong style="color: var(--el-color-danger);">不可撤销</strong>，请确保已备份。`,
+      "初始化系统",
+      {
+        confirmButtonText: "确认初始化",
+        cancelButtonText: "取消",
+        confirmButtonClass: "el-button--danger",
+        cancelButtonClass: "el-button--primary",
+        dangerouslyUseHTMLString: true,
+        type: "warning",
+      }
+    );
+  } catch {
+    return;
+  }
+
+  reinitializing.value = true;
+  try {
+    await dbManager.deleteDatabase();
+    await initializeDefaultShifts();
+    ElMessage.success("系统已重新初始化，页面即将刷新");
+    setTimeout(() => window.location.reload(), 1200);
+  } catch (error) {
+    console.error("系统初始化失败", error);
+    ElMessage.error("初始化失败，请稍后重试");
+  } finally {
+    reinitializing.value = false;
   }
 };
 
@@ -164,12 +253,12 @@ const parseTimestamp = (value: any): Date => {
  * 执行数据导入
  */
 const importData = async (data: any) => {
-  const { people, shifts, extraRestConfigs } = data;
+  const { people, shifts, extraRestConfigs, schedules: schedulePayload } = data;
   const now = getCurrentDateTime();
   const db = await dbManager.getDB();
 
   const transaction = db.transaction(
-    ['people', 'shifts', 'extraRestConfigs'],
+    ['people', 'shifts', 'extraRestConfigs', 'schedules'],
     'readwrite'
   );
 
@@ -192,14 +281,16 @@ const importData = async (data: any) => {
   }
 
   // 导入班次
-  if (Array.isArray(shifts)) {
-    for (const s of shifts) {
+  const normalizedShifts = normalizeShifts(shifts as Shift[]);
+
+  if (Array.isArray(normalizedShifts)) {
+    for (const s of normalizedShifts) {
       // 验证必要字段
       if (!s.id || !s.name) {
         console.warn('跳过无效班次数据:', s);
         continue;
       }
-      
+
       const item = {
         ...s,
         createdAt: parseTimestamp(s.createdAt),
@@ -227,6 +318,23 @@ const importData = async (data: any) => {
     }
   }
 
+  // 导入排班记录（若存在）
+  if (Array.isArray(schedulePayload)) {
+    for (const schedule of schedulePayload) {
+      if (!schedule.id || !schedule.personId || !schedule.shiftId || !schedule.date) {
+        console.warn("跳过无效排班记录:", schedule);
+        continue;
+      }
+
+      const item = {
+        ...schedule,
+        createdAt: parseTimestamp(schedule.createdAt),
+        updatedAt: parseTimestamp(schedule.updatedAt),
+      };
+      transaction.objectStore('schedules').put(item);
+    }
+  }
+
   // 只需等待事务完成
   await transaction.done;
 };
@@ -235,10 +343,19 @@ const importData = async (data: any) => {
 <style lang="scss" scoped>
 .config-management-page {
   height: 100%;
-   min-height: 300px;
+
   .el-card {
     height: 100%;
     background: var(--el-bg-color);
+    display: flex;
+    flex-direction: column;
+  }
+
+  :deep(.el-card__body) {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
   }
 
   .card-header {
@@ -250,34 +367,82 @@ const importData = async (data: any) => {
   .actions-container {
     display: flex;
     flex-direction: column;
-    gap: 20px;
-    padding: 20px 0;
+    gap: 24px;
+    padding: 24px 0;
+    overflow-y: auto;
+    max-height: calc(100vh - 240px);
+    padding-right: 8px;
   }
 
   .action-item {
     display: flex;
     justify-content: space-between;
-    align-items: center;
-    padding: 0 10px;
+    align-items: flex-start;
+    padding: 20px 24px;
+    background: var(--el-fill-color-blank);
+    border: 1px solid var(--el-border-color-light);
+    border-radius: 8px;
+    transition: all 0.3s ease;
+
+    &:hover {
+      border-color: var(--el-border-color);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.06);
+    }
+
+    &.danger {
+      border-color: var(--el-color-danger-light-7);
+      background: var(--el-color-danger-light-9);
+
+      &:hover {
+        border-color: var(--el-color-danger-light-5);
+        box-shadow: 0 2px 12px rgba(var(--el-color-danger-rgb), 0.1);
+      }
+
+      .action-info h3 {
+        color: var(--el-color-danger);
+      }
+    }
 
     .action-info {
+      flex: 1;
+      max-width: 600px;
+
       h3 {
         margin: 0 0 8px 0;
-        font-size: 16px;
+        font-size: 17px;
+        font-weight: 600;
         color: var(--el-text-color-primary);
+        display: flex;
+        align-items: center;
+        gap: 8px;
       }
+
       p {
         margin: 0;
         font-size: 14px;
+        line-height: 1.6;
         color: var(--el-text-color-secondary);
+
+        strong {
+          color: var(--el-color-danger);
+          font-weight: 600;
+        }
+      }
+    }
+
+    .action-controls {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+      align-items: flex-end;
+      min-width: 140px;
+
+      .export-option {
+        font-size: 13px;
+        user-select: none;
       }
     }
   }
 
-  .divider {
-    height: 1px;
-    background-color: var(--el-border-color-lighter);
-    margin: 0 10px;
-  }
 }
 </style>
