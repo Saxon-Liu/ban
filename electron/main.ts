@@ -20,6 +20,7 @@ if (process.platform === 'win32') {
 
 class AppManager {
   private mainWindow: InstanceType<typeof BrowserWindow> | null = null
+  private securityInitialized = false
   private readonly appContext = {
     userName: '本地用户',
     roles: ['user'],
@@ -51,6 +52,35 @@ class AppManager {
     } catch {
       return []
     }
+  }
+
+  private isDevelopment() {
+    return !app.isPackaged || Boolean(process.env.VITE_DEV_SERVER_URL)
+  }
+
+  private buildContentSecurityPolicy() {
+    const allowedOrigins = [...this.getDevOrigins()]
+    const scriptSources = ["'self'"]
+    const connectSources = ["'self'", ...allowedOrigins]
+
+    if (this.isDevelopment()) {
+      scriptSources.push("'unsafe-eval'")
+      connectSources.push('http://127.0.0.1:2510', 'http://localhost:2510', 'ws://127.0.0.1:2510', 'ws://localhost:2510')
+    }
+
+    return [
+      `default-src 'self'`,
+      `script-src ${scriptSources.join(' ')}`,
+      `style-src 'self' 'unsafe-inline'`,
+      `img-src 'self' data: blob:`,
+      `font-src 'self' data:`,
+      `connect-src ${connectSources.join(' ')}`,
+      `worker-src 'self' blob:`,
+      `media-src 'self' data: blob:`,
+      `object-src 'none'`,
+      `base-uri 'self'`,
+      `frame-ancestors 'none'`,
+    ].join('; ')
   }
 
   private getIconPath() {
@@ -271,7 +301,12 @@ class AppManager {
   }
 
   private setupSecurity() {
-    const webSession = this.mainWindow?.webContents.session ?? session.defaultSession
+    if (this.securityInitialized) {
+      return
+    }
+
+    this.securityInitialized = true
+    const webSession = session.defaultSession
     const filter = { urls: ['*://*/*'] }
     const allowedOrigins = new Set([
       'http://127.0.0.1:2510',
@@ -281,10 +316,10 @@ class AppManager {
       ...this.getDevOrigins(),
     ])
 
-    webSession.webRequest.onBeforeRequest(filter, (details: any, callback: (response: { cancel?: boolean }) => void) => {
+    webSession.webRequest.onBeforeRequest(filter, (details, callback) => {
       const isAllowedOrigin = Array.from(allowedOrigins).some((origin) => details.url.startsWith(origin))
       if (!details.url.startsWith('file://') && !details.url.startsWith('devtools://') && !isAllowedOrigin) {
-        if (process.env.NODE_ENV === 'development') {
+        if (this.isDevelopment()) {
           appLogger.warn('阻止外部请求', { url: details.url })
         }
         callback({ cancel: true })
@@ -293,13 +328,12 @@ class AppManager {
       callback({})
     })
 
-    webSession.webRequest.onHeadersReceived(filter, (details: any, callback: (response: { responseHeaders: Record<string, string[]> }) => void) => {
-      const cspSources = ["'self'", "'unsafe-inline'", "'unsafe-eval'", 'data:', 'blob:', ...allowedOrigins]
+    webSession.webRequest.onHeadersReceived(filter, (details, callback) => {
       callback({
         responseHeaders: {
           ...details.responseHeaders,
           'Content-Security-Policy': [
-            `default-src ${cspSources.join(' ')};`,
+            this.buildContentSecurityPolicy(),
           ],
         },
       })
@@ -341,10 +375,10 @@ class AppManager {
     await app.whenReady()
     appLogger.info('应用准备就绪', { ms: Math.round(performance.now() - start) })
 
-    await this.createWindow()
     this.setupIPC()
     this.setupSecurity()
     this.setupEventHandlers()
+    await this.createWindow()
     Menu.setApplicationMenu(null)
     this.mainWindow?.setMenuBarVisibility(false)
     appLogger.info('应用初始化完成', { ms: Math.round(performance.now() - start) })

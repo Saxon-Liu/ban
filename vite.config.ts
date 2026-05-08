@@ -3,6 +3,41 @@ import vue from "@vitejs/plugin-vue";
 import { resolve } from "path";
 import electron from "vite-plugin-electron/simple";
 
+function buildRendererCsp(mode: string, options: { includeFrameAncestors?: boolean } = {}) {
+  const { includeFrameAncestors = true } = options;
+  const isDevelopment = mode === "development" || mode === "electron";
+  const scriptSources = ["'self'"];
+  const connectSources = ["'self'"];
+
+  if (isDevelopment) {
+    scriptSources.push("'unsafe-eval'");
+    connectSources.push(
+      "http://127.0.0.1:2510",
+      "http://localhost:2510",
+      "ws://127.0.0.1:2510",
+      "ws://localhost:2510"
+    );
+  }
+
+  const directives = [
+    `default-src 'self'`,
+    `script-src ${scriptSources.join(" ")}`,
+    "style-src 'self' 'unsafe-inline'",
+    "img-src 'self' data: blob:",
+    "font-src 'self' data:",
+    `connect-src ${connectSources.join(" ")}`,
+    "worker-src 'self' blob:",
+    "object-src 'none'",
+    "base-uri 'self'",
+  ];
+
+  if (includeFrameAncestors) {
+    directives.push("frame-ancestors 'none'");
+  }
+
+  return directives.join("; ");
+}
+
 // https://vitejs.dev/config/
 export default defineConfig(async ({ mode }) => {
   const isElectronMode = mode === "electron";
@@ -34,7 +69,21 @@ export default defineConfig(async ({ mode }) => {
 
   return {
     base: "./",
-    plugins: [vue(), ...electronPlugins],
+    appType: "spa",
+    plugins: [
+      vue(),
+      {
+        name: "inject-csp-meta",
+        transformIndexHtml(html) {
+          return html.replace(
+            '<meta name="viewport" content="width=device-width, initial-scale=1.0" />',
+            `<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <meta http-equiv="Content-Security-Policy" content="${buildRendererCsp(mode, { includeFrameAncestors: false })}" />`
+          );
+        },
+      },
+      ...electronPlugins,
+    ],
     resolve: {
       alias: {
         "@": resolve(__dirname, "src"),
