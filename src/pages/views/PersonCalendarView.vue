@@ -261,8 +261,9 @@ import { ElMessage, ElMessageBox } from "element-plus";
 import { Plus, ArrowDown } from "@element-plus/icons-vue";
 import draggable from "vuedraggable";
 import dayjs from "dayjs";
-import type { ExtraRestConfig, Person, Schedule, Shift } from "@/types";
+import type { ExtraRestConfig, Person, Schedule } from "@/types";
 import { repositories } from "@/repositories";
+import { useScheduleViewData } from "@/composables/useScheduleViewData";
 import { buildPersonStatistics, getRestShiftId, scheduleService } from "@/services";
 import {
   getAdaptiveTextColor,
@@ -305,10 +306,18 @@ const persistSelectedPersonIds = (ids: string[]) => {
 };
 
 const currentMonth = toRef(props, "currentMonth");
-const people = ref<Person[]>([]);
-const shifts = ref<Shift[]>([]);
-const schedules = ref<Schedule[]>([]);
-const loading = ref(false);
+const {
+  activePeople,
+  activeShifts,
+  isScheduleEditable,
+  loading,
+  mergeSchedules,
+  people,
+  removeSchedulesByIds,
+  schedules,
+  shiftMap,
+  shifts,
+} = useScheduleViewData();
 const extraRestConfigs = ref<Map<string, ExtraRestConfig>>(new Map());
 const selectedPersonIds = ref<string[]>(getInitialSelectedPersonIds());
 const calendarWrapperRef = ref<HTMLElement | null>(null);
@@ -344,16 +353,6 @@ const monthLabel = computed(() =>
   dayjs(`${currentMonth.value}-01`).format("YYYY年MM月")
 );
 
-const shiftMap = computed(() => {
-  const map = new Map<string, Shift>();
-  shifts.value.forEach((shift) => map.set(shift.id, shift));
-  return map;
-});
-
-const activeShifts = computed(() =>
-  shifts.value.filter((shift) => !shift.archivedAt)
-);
-
 const scheduleMap = computed(() => {
   const map = new Map<string, Schedule>();
   schedules.value.forEach((schedule) => {
@@ -369,7 +368,7 @@ const selectedPeople = computed(() =>
 );
 
 const availablePeople = computed(() =>
-  people.value.filter((p) => !selectedPersonIds.value.includes(p.id))
+  activePeople.value.filter((person) => !selectedPersonIds.value.includes(person.id))
 );
 
 const layoutClass = computed<"flex-single-col" | "flex-two-cols">(() => {
@@ -427,7 +426,7 @@ const handleDragUpdate = (newPeople: Person[]) => {
 
 const loadBaseData = async () => {
   const [peopleData, shiftData, extraRestConfigData] = await Promise.all([
-    repositories.people.getAll(),
+    repositories.people.getAllIncludingArchived(),
     repositories.shifts.getAllIncludingArchived(),
     repositories.extraRestConfigs.getAll(),
   ]);
@@ -457,20 +456,6 @@ const loadSchedules = async () => {
   );
 
   schedules.value = results.flat();
-};
-
-const mergeSchedules = (...items: Schedule[]) => {
-  const map = new Map(schedules.value.map((schedule) => [schedule.id, schedule]));
-  for (const item of items) {
-    map.set(item.id, item);
-  }
-  schedules.value = Array.from(map.values());
-};
-
-const removeSchedulesByIds = (ids: string[]) => {
-  if (ids.length === 0) return;
-  const deletedIds = new Set(ids);
-  schedules.value = schedules.value.filter((schedule) => !deletedIds.has(schedule.id));
 };
 
 const loadData = async () => {
@@ -510,12 +495,6 @@ const getShiftTagStyle = (shiftId: string) => {
     borderColor: "transparent",
     "--shift-tag-text-color": textColor,
   };
-};
-
-const isScheduleEditable = (personId: string, shiftId: string) => {
-  const person = people.value.find((item) => item.id === personId);
-  const shift = shiftMap.value.get(shiftId);
-  return !person?.archivedAt && !shift?.archivedAt;
 };
 
 const formatMonthDay = (date: string) => dayjs(date).format("MM-DD");

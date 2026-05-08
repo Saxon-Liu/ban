@@ -54,7 +54,7 @@ export class IndexedDBShiftRepository implements ShiftRepository {
     const now = getCurrentDateTime()
     const existing = await this.getAllIncludingArchived()
     const maxOrder = existing
-      .map(s => (typeof (s as any).order === 'number' ? (s as any).order : 0))
+      .map((shift) => (typeof shift.order === 'number' ? shift.order : 0))
       .reduce((m, v) => (v > m ? v : m), 0)
     const nextOrder = maxOrder + 1
     const shift: Shift = {
@@ -121,13 +121,13 @@ export class IndexedDBShiftRepository implements ShiftRepository {
   async getDefaultShifts(): Promise<Shift[]> {
     try {
       const all = await this.getAll()
-      return all.filter(s => (s as any).isRest === true)
-    } catch (error: any) {
+      return all.filter((shift) => shift.isRest)
+    } catch (error: unknown) {
       console.error('[getDefaultShifts-error]', {
         time: new Date().toISOString(),
         params: {},
-        message: error?.message,
-        stack: error?.stack,
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
       })
       return []
     }
@@ -139,13 +139,13 @@ export class IndexedDBShiftRepository implements ShiftRepository {
   async getCustomShifts(): Promise<Shift[]> {
     try {
       const all = await this.getAll()
-      return all.filter(s => (s as any).isRest !== true)
-    } catch (error: any) {
+      return all.filter((shift) => !shift.isRest)
+    } catch (error: unknown) {
       console.error('[getCustomShifts-error]', {
         time: new Date().toISOString(),
         params: {},
-        message: error?.message,
-        stack: error?.stack,
+        message: error instanceof Error ? error.message : String(error),
+        stack: error instanceof Error ? error.stack : undefined,
       })
       return []
     }
@@ -184,7 +184,7 @@ export class IndexedDBShiftRepository implements ShiftRepository {
     const existing = await this.getAllIncludingArchived()
     let nextOrder =
       existing
-        .map(s => (typeof (s as any).order === 'number' ? (s as any).order : 0))
+        .map((shift) => (typeof shift.order === 'number' ? shift.order : 0))
         .reduce((m, v) => (v > m ? v : m), 0) + 1
     const shifts: Shift[] = items.map(item => ({
       id: generateId(),

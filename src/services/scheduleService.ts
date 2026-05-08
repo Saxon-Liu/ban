@@ -1,7 +1,8 @@
 import type { Schedule } from '@/types'
 import { repositories } from '@/repositories'
+import { dbManager } from '@/repositories/IndexedDBManager'
 import { getScheduleCellKey } from './scheduleStatistics'
-import { sortByOrder } from '@/utils'
+import { generateId, getCurrentDateTime, sortByOrder } from '@/utils'
 
 interface AssignShiftParams {
   personId: string
@@ -39,6 +40,7 @@ export interface TransferCellSchedulesResult {
   createdCount: number
   conflictCount: number
   createdSchedules: Schedule[]
+  updatedSchedules: Schedule[]
   deletedIds: string[]
 }
 
@@ -59,6 +61,17 @@ async function assertActiveSchedulingEntities(personId: string, shiftId?: string
   const shift = await repositories.shifts.getById(shiftId)
   if (!shift || shift.archivedAt) {
     throw new Error('该班次已归档，仅保留历史排班，不可继续排班')
+  }
+}
+
+async function assertUniqueSchedulePerDay(
+  personId: string,
+  date: string,
+  excludeScheduleId?: string
+): Promise<void> {
+  const existing = await repositories.schedules.getByPersonAndDate(personId, date)
+  if (existing && existing.id !== excludeScheduleId) {
+    throw new Error('该员工当天已有排班，请先删除原有排班')
   }
 }
 
@@ -122,6 +135,7 @@ export class ScheduleService {
   async appendScheduleToCell(params: AppendScheduleParams): Promise<Schedule> {
     const { personId, shiftId, date, month } = params
     await assertActiveSchedulingEntities(personId, shiftId)
+    await assertUniqueSchedulePerDay(personId, date)
     const existingCell = await repositories.schedules.getByDate(date)
     const maxOrder = existingCell
       .filter((schedule) => schedule.shiftId === shiftId)
@@ -141,6 +155,7 @@ export class ScheduleService {
   ): Promise<{ created: Schedule; updated: Schedule[] }> {
     const { personId, shiftId, date, month, targetIndex } = params
     await assertActiveSchedulingEntities(personId, shiftId)
+    await assertUniqueSchedulePerDay(personId, date)
     const existingCell = getSchedulesForCell(await repositories.schedules.getByDate(date), date, shiftId)
     const nextOrderSchedules = [...existingCell]
     nextOrderSchedules.splice(targetIndex, 0, {
@@ -227,7 +242,7 @@ export class ScheduleService {
 
     const sourceSchedules = getSchedulesForCell(schedules, sourceDate, sourceShiftId)
     if (sourceSchedules.length === 0) {
-      return { createdCount: 0, conflictCount: 0, createdSchedules: [], deletedIds: [] }
+      return { createdCount: 0, conflictCount: 0, createdSchedules: [], updatedSchedules: [], deletedIds: [] }
     }
 
     const sourceShift = await repositories.shifts.getById(sourceShiftId)
@@ -240,30 +255,46 @@ export class ScheduleService {
       throw new Error('该班次已归档，仅保留历史排班，不可继续排班')
     }
 
+    const db = await dbManager.getDB()
+    const tx = db.transaction('schedules', 'readwrite')
+    const store = tx.store
+    const now = getCurrentDateTime()
+
+    const sourceDateSchedules = (await store.index('by-date').getAll(sourceDate)) as Schedule[]
+    const targetDateSchedules = sourceDate === targetDate
+      ? sourceDateSchedules
+      : ((await store.index('by-date').getAll(targetDate)) as Schedule[])
+
+    const currentSourceSchedules = getSchedulesForCell(sourceDateSchedules, sourceDate, sourceShiftId)
     const targetKey = getScheduleCellKey(targetDate, targetShiftId)
-    const targetSchedules = schedules.filter(
+    const currentTargetSchedules = targetDateSchedules.filter(
       (schedule) => getScheduleCellKey(schedule.date, schedule.shiftId) === targetKey
     )
 
-    let maxOrder = targetSchedules.reduce(
+    let maxOrder = currentTargetSchedules.reduce(
       (max, schedule) => Math.max(max, schedule.order ?? 0),
       0
     )
 
     const existingByTargetDate = new Map<string, Schedule>()
-    schedules
-      .filter((schedule) => schedule.date === targetDate)
-      .forEach((schedule) => existingByTargetDate.set(schedule.personId, schedule))
+    targetDateSchedules.forEach((schedule) => existingByTargetDate.set(schedule.personId, schedule))
+    const targetPersonIds = new Set(currentTargetSchedules.map((schedule) => schedule.personId))
 
-    const targetPersonIds = new Set(targetSchedules.map((schedule) => schedule.personId))
-    const toCreate: Array<Omit<Schedule, 'id' | 'createdAt' | 'updatedAt'>> = []
-    const toDelete: string[] = []
+    const createdSchedules: Schedule[] = []
+    const updatedSchedules: Schedule[] = []
+    const deletedIds: string[] = []
     let conflictCount = 0
 
-    for (const source of sourceSchedules) {
+    for (const source of currentSourceSchedules) {
       await assertActiveSchedulingEntities(source.personId, targetShiftId)
 
-      if (source.date !== targetDate && existingByTargetDate.has(source.personId)) {
+      const existingTargetSchedule = existingByTargetDate.get(source.personId)
+      const canReuseSameDaySchedule =
+        mode === 'move' &&
+        source.date === targetDate &&
+        existingTargetSchedule?.id === source.id
+
+      if (existingTargetSchedule && !canReuseSameDaySchedule) {
         conflictCount++
         continue
       }
@@ -273,31 +304,51 @@ export class ScheduleService {
       }
 
       maxOrder++
-      toCreate.push({
+
+      if (mode === 'move' && source.date === targetDate) {
+        const updatedSchedule: Schedule = {
+          ...source,
+          shiftId: targetShiftId,
+          month,
+          order: maxOrder,
+          updatedAt: now,
+        }
+        await store.put(updatedSchedule)
+        updatedSchedules.push(updatedSchedule)
+        targetPersonIds.add(source.personId)
+        existingByTargetDate.set(source.personId, updatedSchedule)
+        continue
+      }
+
+      const createdSchedule: Schedule = {
+        id: generateId(),
         personId: source.personId,
         shiftId: targetShiftId,
         date: targetDate,
         month,
         order: maxOrder,
-      })
+        createdAt: now,
+        updatedAt: now,
+      }
+      await store.add(createdSchedule)
+      createdSchedules.push(createdSchedule)
+      targetPersonIds.add(source.personId)
+      existingByTargetDate.set(source.personId, createdSchedule)
 
       if (mode === 'move') {
-        toDelete.push(source.id)
+        await store.delete(source.id)
+        deletedIds.push(source.id)
       }
     }
 
-    if (toDelete.length > 0) {
-      await Promise.all(toDelete.map((id) => repositories.schedules.delete(id)))
-    }
-
-    const createdSchedules =
-      toCreate.length > 0 ? await repositories.schedules.batchCreate(toCreate) : []
+    await tx.done
 
     return {
       createdCount: createdSchedules.length,
       conflictCount,
       createdSchedules,
-      deletedIds: toDelete,
+      updatedSchedules,
+      deletedIds,
     }
   }
 }
