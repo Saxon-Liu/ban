@@ -136,13 +136,12 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, reactive, watch, nextTick } from "vue";
+import { ref, onMounted, onBeforeUnmount, reactive, watch, nextTick } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { Plus, Edit, Delete, Upload, Download, Rank } from "@element-plus/icons-vue";
 import type { Person, PersonWithStatistics } from "@/types";
 import { repositories } from "@/repositories";
-import { getCurrentMonth } from "@/utils";
-import { excelExportService } from "@/services";
+import { excelExportService, getViewedScheduleMonth } from "@/services";
 import Sortable from "sortablejs";
 
 // 响应式数据
@@ -152,12 +151,13 @@ const showAddDialog = ref(false);
 const editingPerson = ref<Person | null>(null);
 const personFormRef = ref();
 const importFileRef = ref<HTMLInputElement | null>(null);
+let sortableInstance: Sortable | null = null;
 
 // 表单数据
 const personForm = reactive({
   name: "",
   color: "#FF6B6B",
-  baseRestDays: 4,
+  baseRestDays: 8,
 });
 
 // 表单验证规则
@@ -185,9 +185,8 @@ const personRules = {
 const loadPeople = async () => {
   loading.value = true;
   try {
-    const currentMonth = getCurrentMonth();
+    const currentMonth = getViewedScheduleMonth();
     people.value = await repositories.people.getAllWithStatistics(currentMonth);
-    // Re-init sortable after data load if necessary, or rely on persistent DOM
     initSortable();
   } catch (error) {
     console.error("加载人员列表失败:", error);
@@ -233,8 +232,8 @@ const handleDelete = async (person: PersonWithStatistics) => {
 
     if (hasSchedules) {
       await ElMessageBox.confirm(
-        `人员 "${person.name}" 已有排班记录，删除将同时清理所有相关排班数据。是否继续？`,
-        "确认删除",
+        `人员 "${person.name}" 已有历史排班记录。归档后会保留今天之前的历史排班，并自动清理今天及未来的待执行排班，后续新增同名人员也会视为新人员。是否继续？`,
+        "确认归档",
         {
           confirmButtonText: "确定",
           cancelButtonText: "取消",
@@ -243,8 +242,8 @@ const handleDelete = async (person: PersonWithStatistics) => {
       );
     } else {
       await ElMessageBox.confirm(
-        `确定要删除人员 "${person.name}" 吗？`,
-        "确认删除",
+        `确定要归档人员 "${person.name}" 吗？归档后该人员将不再出现在后续排班和人员列表中。`,
+        "确认归档",
         {
           confirmButtonText: "确定",
           cancelButtonText: "取消",
@@ -302,9 +301,11 @@ watch(showAddDialog, (newVal) => {
 
 const initSortable = () => {
   nextTick(() => {
+    sortableInstance?.destroy();
+    sortableInstance = null;
     const table = document.querySelector("#people-table .el-table__body-wrapper tbody");
     if (table) {
-      Sortable.create(table as HTMLElement, {
+      sortableInstance = Sortable.create(table as HTMLElement, {
         handle: ".drag-handle",
         animation: 150,
         ghostClass: "sortable-ghost",
@@ -346,6 +347,11 @@ const initSortable = () => {
 // 页面加载时初始化数据
 onMounted(() => {
   loadPeople();
+});
+
+onBeforeUnmount(() => {
+  sortableInstance?.destroy();
+  sortableInstance = null;
 });
 
 const handleExportPeople = async () => {
@@ -399,6 +405,10 @@ const handleImportFileChange = async (e: Event) => {
   const file = target.files?.[0];
   if (!file) return;
   try {
+    const existingPeople = await repositories.people.getAll();
+    const existingNameSet = new Set(
+      existingPeople.map((person) => person.name.trim())
+    );
     const buffer = await file.arrayBuffer();
     const { Workbook } = await import("exceljs");
     const workbook = new Workbook();
@@ -417,11 +427,61 @@ const handleImportFileChange = async (e: Event) => {
       return;
     }
     const rows = sheet.getRows(2, sheet.rowCount - 1) || [];
-    let created = 0;
+    const duplicateExistingNames = new Set<string>();
+    const duplicateInFileNames = new Set<string>();
+    const fileNameSet = new Set<string>();
     for (const r of rows) {
       const vals = (r.values as any[]) || [];
       const name = String(vals[nameIdx] || "").trim();
       if (!name) continue;
+      if (existingNameSet.has(name)) {
+        duplicateExistingNames.add(name);
+      }
+      if (fileNameSet.has(name)) {
+        duplicateInFileNames.add(name);
+      } else {
+        fileNameSet.add(name);
+      }
+    }
+
+    let skipExistingDuplicates = false;
+    if (duplicateExistingNames.size > 0) {
+      try {
+        await ElMessageBox.confirm(
+          `检测到与当前人员列表重名 ${duplicateExistingNames.size} 条。确定后将继续导入，并把这些重名人员视为新人员；取消则跳过这些重名人员。`,
+          "重名导入确认",
+          {
+            confirmButtonText: "继续导入重名",
+            cancelButtonText: "跳过现有重名",
+            type: "warning",
+            distinguishCancelAndClose: true,
+          }
+        );
+      } catch (error) {
+        if (error === "cancel") {
+          skipExistingDuplicates = true;
+        } else {
+          throw error;
+        }
+      }
+    }
+
+    let created = 0;
+    let skippedExisting = 0;
+    let skippedInFile = 0;
+    const importedNameSet = new Set<string>();
+    for (const r of rows) {
+      const vals = (r.values as any[]) || [];
+      const name = String(vals[nameIdx] || "").trim();
+      if (!name) continue;
+      if (skipExistingDuplicates && existingNameSet.has(name)) {
+        skippedExisting++;
+        continue;
+      }
+      if (importedNameSet.has(name)) {
+        skippedInFile++;
+        continue;
+      }
       let color = String(vals[colorIdx] || "").trim();
       if (!color) {
         try {
@@ -436,6 +496,7 @@ const handleImportFileChange = async (e: Event) => {
       if (baseRestDays > 31) baseRestDays = 31;
       try {
         await repositories.people.create({ name, color, baseRestDays });
+        importedNameSet.add(name);
         created++;
       } catch (err: any) {
         console.error("[people-import-create-error]", {
@@ -446,7 +507,9 @@ const handleImportFileChange = async (e: Event) => {
         });
       }
     }
-    ElMessage.success(`导入成功：${created} 条`);
+    ElMessage.success(
+      `导入完成：新增 ${created} 条，跳过现有重名 ${skippedExisting} 条，跳过文件内重复 ${skippedInFile} 条`
+    );
     await loadPeople();
   } catch (error: any) {
     console.error("[people-import-error]", {
