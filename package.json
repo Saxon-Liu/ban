@@ -6,6 +6,11 @@
   "scripts": {
     "dev": "vite",
     "build": "vue-tsc && vite build",
+    "build:electron:sync": "powershell -ExecutionPolicy Bypass -File .\\scripts\\electron-shell.ps1 -Step sync",
+    "build:electron:portable": "powershell -ExecutionPolicy Bypass -File .\\scripts\\electron-shell.ps1 -Target portable",
+    "build:electron:setup": "powershell -ExecutionPolicy Bypass -File .\\scripts\\electron-shell.ps1 -Target setup",
+    "build:electron:green": "powershell -ExecutionPolicy Bypass -File .\\scripts\\electron-shell.ps1 -Target green",
+    "build:electron:all": "powershell -ExecutionPolicy Bypass -File .\\scripts\\electron-shell.ps1 -Target all",
     "preview": "vite preview",
     "type-check": "vue-tsc --noEmit"
   },
