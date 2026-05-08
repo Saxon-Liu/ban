@@ -15,6 +15,22 @@
 
 当前仓库是唯一主仓库，不再依赖外部 `electron-shell` 壳项目。
 
+## 界面截图
+
+截图资源已整理到 `docs/images/`，避免与运行时代码和打包资源混放。
+
+### 登录页
+
+![登录页](docs/images/login.png)
+
+### 排班主页
+
+![排班主页](docs/images/schedule.png)
+
+### 基础配置页
+
+![基础配置页](docs/images/dashboard.png)
+
 ## 主要功能
 
 ### 业务功能
@@ -61,6 +77,7 @@
 
 ```text
 .
+├─ docs/images/                README 截图资源
 ├─ electron/                  Electron 主进程、preload、日志
 ├─ resources/                 Electron 图标资源
 ├─ src/
