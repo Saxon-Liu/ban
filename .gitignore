@@ -1,5 +1,65 @@
-node_modules
-.history
-.trae
-dist
-/*.zip
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+*.zip
+
+# Local editor / tool state
+.history/
+.trae/
+.idea/
+.vscode/
+
+# Logs
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+pnpm-debug.log*
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# OS files
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.swp
+*.swo
+
+# Local test / export / backup data
+exports/
+backups/
+backup/
+data/
+*.db
+*.sqlite
+*.sqlite3
+*.json.bak
+*.xlsx
+*.xls
+*.csv
+*.tsv
+*.pdf
+*.png
+*.jpg
+*.jpeg
+*.webp
+
+# Keep source assets if they are added under src/public in the future
+!src/**/*.png
+!src/**/*.jpg
+!src/**/*.jpeg
+!src/**/*.webp
+!public/**/*.png
+!public/**/*.jpg
+!public/**/*.jpeg
+!public/**/*.webp
