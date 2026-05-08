@@ -12,6 +12,8 @@ node_modules/
 
 # Build output
 dist/
+dist-electron/
+release/
 
 # Local env files
 .env
@@ -28,9 +30,13 @@ Thumbs.db
 vite.config.js.timestamp-*
 vite.config.ts.timestamp-*
 .vite/
+.vite-inspect/
 
 # Local project-only directories
 .history/
 .trae/
 
 *.zip
+*.blockmap
+builder-debug.yml
+builder-effective-config.yaml

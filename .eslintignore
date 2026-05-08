@@ -1,0 +1,7 @@
+dist
+dist-electron
+release
+node_modules
+resources
+vite-electron.err.log
+vite-electron.out.log
