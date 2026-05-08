@@ -53,33 +53,6 @@
           </div>
         </div>
 
-        <div class="action-item">
-          <div class="action-info">
-            <h3>自动退出</h3>
-            <p>配置无操作自动退出登录的提醒时间和总超时时间，修改后立即生效。</p>
-          </div>
-          <div class="action-controls auto-logout-controls">
-            <el-switch v-model="autoLogoutForm.enabled" active-text="启用自动退出" />
-            <el-input-number
-              v-model="autoLogoutForm.warningMinutes"
-              :min="1"
-              :max="29"
-              :disabled="!autoLogoutForm.enabled"
-            />
-            <span class="control-hint">提醒时间（分钟）</span>
-            <el-input-number
-              v-model="autoLogoutForm.totalMinutes"
-              :min="2"
-              :max="30"
-              :disabled="!autoLogoutForm.enabled"
-            />
-            <span class="control-hint">总超时时间（分钟）</span>
-            <el-button type="primary" plain @click="handleSaveAutoLogout">
-              保存设置
-            </el-button>
-          </div>
-        </div>
-
         <div class="action-item danger">
           <div class="action-info">
             <h3>初始化系统（高危）</h3>
@@ -158,16 +131,7 @@ import { repositories } from "@/repositories";
 import { dbManager } from "@/repositories/IndexedDBManager";
 import { getCurrentDateTime } from "@/utils/common";
 import { initializeDefaultShifts } from "@/services/initialization";
-import {
-  DEFAULT_SHIFTS,
-  DEFAULT_KEY,
-  CUSTOM_KEY_STORAGE,
-  AUTO_LOGOUT_ENABLED_KEY,
-  AUTO_LOGOUT_WARNING_KEY,
-  AUTO_LOGOUT_TOTAL_KEY,
-  AUTO_LOGOUT_WARNING_MINUTES,
-  AUTO_LOGOUT_TOTAL_MINUTES,
-} from "@/utils";
+import { DEFAULT_SHIFTS, DEFAULT_KEY, CUSTOM_KEY_STORAGE } from "@/utils";
 import type { Shift, Schedule } from "@/types";
 import type { LoadingInstance } from "element-plus/es/components/loading/src/loading";
 
@@ -227,24 +191,6 @@ const passwordRules = {
   currentPassword: [{ validator: validateCurrentPassword, trigger: 'blur' }],
   newPassword: [{ validator: validateNewPassword, trigger: 'blur' }],
   confirmPassword: [{ validator: validateConfirmPassword, trigger: 'blur' }],
-}
-
-const autoLogoutForm = reactive({
-  enabled: localStorage.getItem(AUTO_LOGOUT_ENABLED_KEY) !== 'false',
-  warningMinutes: Number(localStorage.getItem(AUTO_LOGOUT_WARNING_KEY)) || AUTO_LOGOUT_WARNING_MINUTES,
-  totalMinutes: Number(localStorage.getItem(AUTO_LOGOUT_TOTAL_KEY)) || AUTO_LOGOUT_TOTAL_MINUTES,
-})
-
-const handleSaveAutoLogout = () => {
-  if (autoLogoutForm.enabled && autoLogoutForm.totalMinutes <= autoLogoutForm.warningMinutes) {
-    ElMessage.warning('总超时时间必须大于提醒时间')
-    return
-  }
-
-  localStorage.setItem(AUTO_LOGOUT_ENABLED_KEY, String(autoLogoutForm.enabled))
-  localStorage.setItem(AUTO_LOGOUT_WARNING_KEY, String(autoLogoutForm.warningMinutes))
-  localStorage.setItem(AUTO_LOGOUT_TOTAL_KEY, String(autoLogoutForm.totalMinutes))
-  ElMessage.success('自动退出设置已保存并立即生效')
 }
 
 /**

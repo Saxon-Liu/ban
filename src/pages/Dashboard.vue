@@ -77,33 +77,39 @@ onUnmounted(() => {
 <style lang="scss" scoped>
 .dashboard-page {
   height: 100%;
-  padding: 10px;
+  // padding: 10px;
   box-sizing: border-box;
   overflow: hidden;
 
   // Tabs 模式样式
   .dashboard-tabs-container {
     height: 100%;
+    min-height: 0;
     
     .dashboard-tabs {
       height: 100%;
+      min-height: 0;
       display: flex;
       flex-direction: column;
 
       :deep(.el-tabs__content) {
         flex: 1;
+        min-height: 0;
         padding: 15px;
         overflow: hidden;
       }
 
       :deep(.el-tab-pane) {
         height: 100%;
+        min-height: 0;
       }
     }
 
     .tab-content-wrapper {
       height: 100%;
-      overflow: auto;
+      min-height: 0;
+      overflow-x: hidden;
+      overflow-y: auto;
     }
   }
 
