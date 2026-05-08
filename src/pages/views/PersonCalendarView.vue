@@ -54,7 +54,6 @@
                         <el-dropdown
                           trigger="click"
                           :hide-on-click="false"
-                          @visible-change="handleDropdownVisibleChange()"
                         >
                           <el-button
                             text
@@ -135,7 +134,12 @@
                           size="default"
                           class="shift-tag"
                           disable-transitions
-                          closable
+                          :closable="
+                            isScheduleEditable(
+                              person.id,
+                              getSchedule(person.id, data.day)!.shiftId
+                            )
+                          "
                           :style="getShiftTagStyle(getSchedule(person.id, data.day)!.shiftId)"
                           @close.stop="removeSchedule(person.id, data.day)"
                         >
@@ -216,7 +220,7 @@
           <div class="quick-select__title">选择班次</div>
           <el-scrollbar max-height="200px">
             <el-button
-              v-for="shift in shifts"
+              v-for="shift in activeShifts"
               :key="shift.id"
               text
               :style="{ justifyContent: 'flex-start', width: '100%' }"
@@ -257,8 +261,9 @@ import { ElMessage, ElMessageBox } from "element-plus";
 import { Plus, ArrowDown } from "@element-plus/icons-vue";
 import draggable from "vuedraggable";
 import dayjs from "dayjs";
-import type { Person, Schedule, Shift } from "@/types";
+import type { ExtraRestConfig, Person, Schedule, Shift } from "@/types";
 import { repositories } from "@/repositories";
+import { buildPersonStatistics, getRestShiftId, scheduleService } from "@/services";
 import {
   getAdaptiveTextColor,
   getNextMonth,
@@ -303,6 +308,7 @@ const people = ref<Person[]>([]);
 const shifts = ref<Shift[]>([]);
 const schedules = ref<Schedule[]>([]);
 const loading = ref(false);
+const extraRestConfigs = ref<Map<string, ExtraRestConfig>>(new Map());
 const selectedPersonIds = ref<string[]>(getInitialSelectedPersonIds());
 const calendarWrapperRef = ref<HTMLElement | null>(null);
 const wrapperWidth = ref(0);
@@ -343,6 +349,10 @@ const shiftMap = computed(() => {
   return map;
 });
 
+const activeShifts = computed(() =>
+  shifts.value.filter((shift) => !shift.archivedAt)
+);
+
 const scheduleMap = computed(() => {
   const map = new Map<string, Schedule>();
   schedules.value.forEach((schedule) => {
@@ -376,19 +386,38 @@ const layoutClass = computed<"flex-single-col" | "flex-two-cols">(() => {
     : "flex-single-col";
 });
 
+const extraRestDaysForCurrentMonth = computed(() => {
+  if (!currentMonth.value) return 0;
+  const [year, month] = currentMonth.value.split("-").map(Number);
+  const config = extraRestConfigs.value.get(`${year}-${month}`);
+  return config?.extraRestDays || 0;
+});
+
+const currentMonthSchedules = computed(() =>
+  schedules.value.filter((schedule) => schedule.month === currentMonth.value)
+);
+
+const remainingRestDayMap = computed(() => {
+  if (!currentMonth.value) return new Map<string, number>();
+  const restShiftId = getRestShiftId(shifts.value);
+  const map = new Map<string, number>();
+  for (const person of people.value) {
+    const stats = buildPersonStatistics({
+      person,
+      month: currentMonth.value,
+      schedules: currentMonthSchedules.value,
+      extraRestDays: extraRestDaysForCurrentMonth.value,
+      restShiftId,
+    });
+    map.set(person.id, stats.remainingRestDays);
+  }
+  return map;
+});
+
 const getRemainingRestDays = (personId: string): number | null => {
   const person = people.value.find((p) => p.id === personId);
-  if (!person || !person.baseRestDays) return null;
-
-  // 统计当月已使用的休息天数
-  const usedRestDays = schedules.value.filter((schedule) => {
-    if (schedule.personId !== personId) return false;
-    if (schedule.month !== currentMonth.value) return false;
-    const shift = shiftMap.value.get(schedule.shiftId);
-    return shift?.isRest === true;
-  }).length;
-
-  return person.baseRestDays - usedRestDays;
+  if (!person) return null;
+  return remainingRestDayMap.value.get(personId) ?? null;
 };
 
 const handleDragUpdate = (newPeople: Person[]) => {
@@ -396,9 +425,10 @@ const handleDragUpdate = (newPeople: Person[]) => {
 };
 
 const loadBaseData = async () => {
-  const [peopleData, shiftData] = await Promise.all([
+  const [peopleData, shiftData, extraRestConfigData] = await Promise.all([
     repositories.people.getAll(),
-    repositories.shifts.getAll(),
+    repositories.shifts.getAllIncludingArchived(),
+    repositories.extraRestConfigs.getAll(),
   ]);
 
   const sortFn = <T extends { order?: number }>(a: T, b: T) =>
@@ -406,6 +436,9 @@ const loadBaseData = async () => {
 
   people.value = [...peopleData].sort(sortFn);
   shifts.value = [...shiftData].sort(sortFn);
+  extraRestConfigs.value = new Map(
+    extraRestConfigData.map((config) => [`${config.year}-${config.month}`, config])
+  );
 
   selectedPersonIds.value = selectedPersonIds.value
     .filter((id) => people.value.some((p) => p.id === id))
@@ -467,6 +500,12 @@ const getShiftTagStyle = (shiftId: string) => {
   };
 };
 
+const isScheduleEditable = (personId: string, shiftId: string) => {
+  const person = people.value.find((item) => item.id === personId);
+  const shift = shiftMap.value.get(shiftId);
+  return !person?.archivedAt && !shift?.archivedAt;
+};
+
 const formatMonthDay = (date: string) => dayjs(date).format("MM-DD");
 
 const isCurrentMonthDate = (date: string) =>
@@ -477,61 +516,22 @@ const isWeekend = (date: string) => {
   return day === 0 || day === 6;
 };
 
-const ensureNoConflict = async (
-  personId: string,
-  date: string,
-  targetShiftId: string
-) => {
-  const existing = getSchedule(personId, date);
-  if (!existing) return null;
-
-  if (existing.shiftId === targetShiftId) {
-    ElMessage.info("该日期已是此班次");
-    throw new Error("same-shift");
-  }
-
-  // await ElMessageBox.confirm("该日期已有班次，是否替换为新班次？", "提示", {
-  //   confirmButtonText: "替换",
-  //   cancelButtonText: "取消",
-  //   type: "warning",
-  // });
-
-  return existing;
-};
-
 const assignShiftToPerson = async (
   personId: string,
   shiftId: string,
   date: string
 ) => {
   try {
-    let existingSchedule: Schedule | null = null;
-
-    try {
-      existingSchedule = await ensureNoConflict(personId, date, shiftId);
-    } catch (error: any) {
-      if (error?.message === "same-shift") {
-        return;
-      }
-      throw error;
+    const outcome = await scheduleService.assignShiftToPerson({
+      personId,
+      shiftId,
+      date,
+    });
+    if (outcome === "same-shift") {
+      ElMessage.info("该日期已是此班次");
+      return;
     }
-
-    if (existingSchedule) {
-      await repositories.schedules.update(existingSchedule.id, {
-        shiftId,
-      });
-      ElMessage.success("已更新班次");
-    } else {
-      await repositories.schedules.create({
-        personId,
-        shiftId,
-        date,
-        month: date.slice(0, 7),
-        order: 1,
-      });
-      ElMessage.success("排班成功");
-    }
-
+    ElMessage.success(outcome === "updated" ? "已更新班次" : "排班成功");
     await loadSchedules();
   } catch (error: any) {
     if (error === "cancel") return;
@@ -545,7 +545,11 @@ const removeSchedule = async (personId: string, date: string) => {
   if (!schedule) return;
 
   try {
-    await repositories.schedules.delete(schedule.id);
+    await scheduleService.removeScheduleByIdentity(
+      personId,
+      date,
+      schedule.shiftId
+    );
     ElMessage.success("已删除排班");
     await loadSchedules();
   } catch (error) {
@@ -555,6 +559,14 @@ const removeSchedule = async (personId: string, date: string) => {
 };
 
 const handleCellClick = (personId: string, date: string, event: Event) => {
+  const existingSchedule = getSchedule(personId, date);
+  if (
+    existingSchedule &&
+    !isScheduleEditable(personId, existingSchedule.shiftId)
+  ) {
+    ElMessage.warning("该历史排班已归档，只允许查看，不可修改");
+    return;
+  }
   quickSelect.personId = personId;
   quickSelect.date = date;
   quickSelect.triggerEl = event.currentTarget as HTMLElement;
@@ -641,8 +653,9 @@ const handleClearPersonSchedules = async (person: Person) => {
       return;
     }
 
-    await Promise.all(
-      personSchedules.map((schedule) => repositories.schedules.delete(schedule.id))
+    await scheduleService.clearPersonMonthSchedules(
+      person.id,
+      currentMonth.value
     );
 
     ElMessage.success(`已清空 ${person.name} 在当前月的排班`);
@@ -653,11 +666,6 @@ const handleClearPersonSchedules = async (person: Person) => {
   } finally {
     personClearingMap[person.id] = false;
   }
-};
-
-const handleDropdownVisibleChange = () => (visible: boolean) => {
-  if (!visible) return;
-  // 预留用于下拉菜单的扩展处理
 };
 
 const updateWrapperWidth = () => {

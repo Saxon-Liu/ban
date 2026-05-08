@@ -97,7 +97,7 @@ import {
 import ScheduleTableView from "./views/ScheduleTableView.vue";
 import PersonCalendarView from "./views/PersonCalendarView.vue";
 import { getCurrentMonth, getNextMonth } from "@/utils";
-import { excelExportService } from "@/services";
+import { excelExportService, scheduleService } from "@/services";
 import { repositories } from "@/repositories";
 import dayjs from "dayjs";
 
@@ -136,6 +136,9 @@ const isTableView = computed(() => activeView.value === "table");
 const handleMonthChange = async (val: string | null) => {
   if (!val) return;
   currentMonth.value = val;
+  if (typeof window !== "undefined") {
+    window.localStorage.setItem(LAST_VIEWED_MONTH_KEY, val);
+  }
 };
 
 const jumpToMonth = (delta: number) => {
@@ -155,8 +158,8 @@ const handleExport = async () => {
   exportLoading.value = true;
   try {
     const [peopleData, shiftData, scheduleData] = await Promise.all([
-      repositories.people.getAll(),
-      repositories.shifts.getAll(),
+      repositories.people.getAllIncludingArchived(),
+      repositories.shifts.getAllIncludingArchived(),
       repositories.schedules.getByMonth(currentMonth.value),
     ]);
 
@@ -199,17 +202,14 @@ const handleClearCurrentMonth = async () => {
 
   clearingSchedules.value = true;
   try {
-    const schedules = await repositories.schedules.getByMonth(
+    const clearedCount = await scheduleService.clearMonthSchedules(
       currentMonth.value
     );
-    if (schedules.length === 0) {
+    if (clearedCount === 0) {
       ElMessage.info("当前月份暂无排班数据");
       return;
     }
 
-    await Promise.all(
-      schedules.map((schedule) => repositories.schedules.delete(schedule.id))
-    );
     ElMessage.success("已清除当月排班");
 
     await Promise.all([

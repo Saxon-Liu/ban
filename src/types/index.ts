@@ -21,6 +21,8 @@ export interface Person extends BaseEntity {
   color: string
   /** 基础月休天数 */
   baseRestDays: number
+  /** 归档时间，为空表示活动人员 */
+  archivedAt?: Date | null
   /** 排序序号（越小越靠前） */
   order?: number
 }
@@ -35,6 +37,8 @@ export interface Shift extends BaseEntity {
   color: string
   /** 是否为休息班次 */
   isRest: boolean
+  /** 归档时间，为空表示活动班次 */
+  archivedAt?: Date | null
   /** 排序序号（越小越靠前） */
   order?: number
 }

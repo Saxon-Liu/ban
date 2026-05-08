@@ -13,17 +13,32 @@ import { generateId, getCurrentDateTime } from '@/utils/common'
  * 班次Repository的IndexedDB实现类
  */
 export class IndexedDBShiftRepository implements ShiftRepository {
+  private sortShifts(list: Shift[]): Shift[] {
+    return [...list].sort((a: any, b: any) => {
+      const ao = typeof a.order === 'number' ? a.order : Number(new Date(a.createdAt))
+      const bo = typeof b.order === 'number' ? b.order : Number(new Date(b.createdAt))
+      return ao - bo
+    })
+  }
+
   /**
    * 获取所有班次
    */
   async getAll(): Promise<Shift[]> {
     const db = await dbManager.getDB()
     const list = await db.getAll('shifts')
-    return [...list].sort((a: any, b: any) => {
-      const ao = typeof a.order === 'number' ? a.order : Number(new Date(a.createdAt))
-      const bo = typeof b.order === 'number' ? b.order : Number(new Date(b.createdAt))
-      return ao - bo
-    })
+    return this.sortShifts(
+      list.filter((shift: Shift) => !shift.archivedAt)
+    )
+  }
+
+  /**
+   * 获取所有班次，包含已归档班次
+   */
+  async getAllIncludingArchived(): Promise<Shift[]> {
+    const db = await dbManager.getDB()
+    const list = await db.getAll('shifts')
+    return this.sortShifts(list as Shift[])
   }
 
   /**
@@ -41,7 +56,7 @@ export class IndexedDBShiftRepository implements ShiftRepository {
   async create(data: CreateData<Shift>): Promise<Shift> {
     const db = await dbManager.getDB()
     const now = getCurrentDateTime()
-    const existing = await db.getAll('shifts')
+    const existing = await this.getAllIncludingArchived()
     const maxOrder = existing
       .map(s => (typeof (s as any).order === 'number' ? (s as any).order : 0))
       .reduce((m, v) => (v > m ? v : m), 0)
@@ -49,6 +64,7 @@ export class IndexedDBShiftRepository implements ShiftRepository {
     const shift: Shift = {
       id: generateId(),
       ...data,
+      archivedAt: null,
       order: nextOrder,
       createdAt: now,
       updatedAt: now,
@@ -84,7 +100,6 @@ export class IndexedDBShiftRepository implements ShiftRepository {
    * 删除班次
    */
   async delete(id: string): Promise<boolean> {
-    const db = await dbManager.getDB()
     const shift = await this.getById(id)
     
     if (!shift) {
@@ -93,15 +108,14 @@ export class IndexedDBShiftRepository implements ShiftRepository {
     if (shift.isRest) {
       throw new Error('“休”不可删除')
     }
-    
-    // 检查是否存在排班记录
-    const hasSchedules = await this.hasScheduleRecords(id)
-    if (hasSchedules) {
-      // 删除相关排班记录
-      await db.delete('schedules', IDBKeyRange.bound([id, ''], [id, '\uffff']))
+
+    if (shift.archivedAt) {
+      return true
     }
-    
-    await db.delete('shifts', id)
+
+    await this.update(id, {
+      archivedAt: getCurrentDateTime(),
+    })
     return true
   }
 
@@ -110,8 +124,7 @@ export class IndexedDBShiftRepository implements ShiftRepository {
    */
   async getDefaultShifts(): Promise<Shift[]> {
     try {
-      const db = await dbManager.getDB()
-      const all = await db.getAll('shifts')
+      const all = await this.getAll()
       return all.filter(s => (s as any).isRest === true)
     } catch (error: any) {
       console.error('[getDefaultShifts-error]', {
@@ -129,8 +142,7 @@ export class IndexedDBShiftRepository implements ShiftRepository {
    */
   async getCustomShifts(): Promise<Shift[]> {
     try {
-      const db = await dbManager.getDB()
-      const all = await db.getAll('shifts')
+      const all = await this.getAll()
       return all.filter(s => (s as any).isRest !== true)
     } catch (error: any) {
       console.error('[getCustomShifts-error]', {
@@ -158,12 +170,13 @@ export class IndexedDBShiftRepository implements ShiftRepository {
   async isNameExists(name: string, excludeId?: string): Promise<boolean> {
     const db = await dbManager.getDB()
     const shifts = await db.getAllFromIndex('shifts', 'by-name', name)
+    const activeShifts = shifts.filter((shift: Shift) => !shift.archivedAt)
     
     if (excludeId) {
-      return shifts.some(shift => shift.id !== excludeId)
+      return activeShifts.some(shift => shift.id !== excludeId)
     }
     
-    return shifts.length > 0
+    return activeShifts.length > 0
   }
 
   /**
@@ -172,9 +185,16 @@ export class IndexedDBShiftRepository implements ShiftRepository {
   async batchCreate(items: CreateData<Shift>[]): Promise<Shift[]> {
     const db = await dbManager.getDB()
     const now = getCurrentDateTime()
+    const existing = await this.getAllIncludingArchived()
+    let nextOrder =
+      existing
+        .map(s => (typeof (s as any).order === 'number' ? (s as any).order : 0))
+        .reduce((m, v) => (v > m ? v : m), 0) + 1
     const shifts: Shift[] = items.map(item => ({
       id: generateId(),
       ...item,
+      archivedAt: null,
+      order: nextOrder++,
       createdAt: now,
       updatedAt: now,
     }))
@@ -218,26 +238,28 @@ export class IndexedDBShiftRepository implements ShiftRepository {
    * 批量删除班次
    */
   async batchDelete(ids: string[]): Promise<boolean> {
+    const now = getCurrentDateTime()
+    const shifts = await Promise.all(ids.map((id) => this.getById(id)))
     const db = await dbManager.getDB()
-    
-    // 检查并删除相关排班记录
-    for (const id of ids) {
-      const shift = await this.getById(id)
+
+    for (const shift of shifts) {
       if (!shift) {
-        throw new Error(`班次不存在: ${id}`)
+        throw new Error('班次不存在')
       }
       if (shift.isRest) {
         throw new Error('“休”不可删除')
       }
-      
-      const hasSchedules = await this.hasScheduleRecords(id)
-      if (hasSchedules) {
-        await db.delete('schedules', IDBKeyRange.bound([id, ''], [id, '\uffff']))
-      }
     }
     
     const tx = db.transaction('shifts', 'readwrite')
-    await Promise.all(ids.map(id => tx.store.delete(id)))
+    for (const shift of shifts) {
+      if (!shift || shift.archivedAt) continue
+      await tx.store.put({
+        ...shift,
+        archivedAt: now,
+        updatedAt: now,
+      })
+    }
     await tx.done
     
     return true
