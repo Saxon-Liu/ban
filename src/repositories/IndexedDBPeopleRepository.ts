@@ -55,7 +55,7 @@ export class IndexedDBPeopleRepository implements PeopleRepository {
     const now = getCurrentDateTime()
     const existing = await this.getAllIncludingArchived()
     const maxOrder = existing
-      .map((p: any) => (typeof p.order === 'number' ? p.order : 0))
+      .map((person) => (typeof person.order === 'number' ? person.order : 0))
       .reduce((m: number, v: number) => (v > m ? v : m), 0)
     const person: Person = {
       id: generateId(),
@@ -210,7 +210,7 @@ export class IndexedDBPeopleRepository implements PeopleRepository {
     const existing = await this.getAllIncludingArchived()
     let nextOrder =
       existing
-        .map((p: any) => (typeof p.order === 'number' ? p.order : 0))
+        .map((person) => (typeof person.order === 'number' ? person.order : 0))
         .reduce((m: number, v: number) => (v > m ? v : m), 0) + 1
 
     const people: Person[] = items.map(item => ({
