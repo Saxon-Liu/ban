@@ -45,6 +45,10 @@ export function useAutoLogout() {
   let warningVisible = false
   let closingForActivity = false
 
+  const isPublicRoute = () => route.path === '/login' || route.matched.some(record => record.meta.public)
+
+  const isAutoLogoutActive = () => !isPublicRoute() && isAuthSessionValid()
+
   const clearTimers = () => {
     if (warningTimer) {
       clearTimeout(warningTimer)
@@ -70,18 +74,19 @@ export function useAutoLogout() {
     if (message) {
       ElMessage.warning(message)
     }
-    if (route.path !== '/login') {
+    if (!isPublicRoute()) {
       await router.push('/login')
     }
   }
 
   const resetTimers = () => {
     clearTimers()
-    if (route.path === '/login' || !isAuthSessionValid()) return
+    if (!isAutoLogoutActive()) return
     const config = getAutoLogoutConfig()
     if (!config.enabled) return
 
     warningTimer = setTimeout(() => {
+      if (!isAutoLogoutActive()) return
       void showWarning()
     }, config.warningMinutes * 60 * 1000)
   }
@@ -97,12 +102,17 @@ export function useAutoLogout() {
   }
 
   const showWarning = async () => {
-    if (warningVisible || route.path === '/login' || !isAuthSessionValid()) return
+    if (warningVisible || !isAutoLogoutActive()) return
     const config = getAutoLogoutConfig()
     if (!config.enabled) return
 
     warningVisible = true
     forceLogoutTimer = setTimeout(() => {
+      if (!isAutoLogoutActive()) {
+        warningVisible = false
+        clearTimers()
+        return
+      }
       warningVisible = false
       void logout('长时间未操作，已自动退出登录')
     }, (config.totalMinutes - config.warningMinutes) * 60 * 1000)
@@ -130,7 +140,7 @@ export function useAutoLogout() {
   }
 
   const handleActivity = () => {
-    if (route.path === '/login' || !isAuthSessionValid()) return
+    if (!isAutoLogoutActive()) return
 
     if (warningVisible) {
       closeWarning()
@@ -157,7 +167,7 @@ export function useAutoLogout() {
   watch(
     () => route.path,
     () => {
-      if (route.path === '/login') {
+      if (isPublicRoute()) {
         clearTimers()
         closeWarning()
         return
