@@ -58,19 +58,17 @@
 
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
-import { useRoute, useRouter } from 'vue-router'
+import { useRoute } from 'vue-router'
 import { Calendar, Tools, Fold, Expand, SwitchButton } from '@element-plus/icons-vue'
-import { AUTH_STORAGE_KEY, AUTH_EXPIRY_KEY } from '@/utils/constants'
+import { useAutoLogout } from '@/composables/useAutoLogout'
 
 const route = useRoute()
-const router = useRouter()
 
 const isLoginPage = computed(() => route.path === '/login')
+const { triggerLogout } = useAutoLogout()
 
 const handleLogout = () => {
-  localStorage.removeItem(AUTH_STORAGE_KEY)
-  localStorage.removeItem(AUTH_EXPIRY_KEY)
-  router.push('/login')
+  void triggerLogout()
 }
 
 const THEME_KEY = 'theme-mode'

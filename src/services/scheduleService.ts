@@ -1,6 +1,7 @@
 import type { Schedule } from '@/types'
 import { repositories } from '@/repositories'
 import { getScheduleCellKey } from './scheduleStatistics'
+import { sortByOrder } from '@/utils'
 
 interface AssignShiftParams {
   personId: string
@@ -39,19 +40,8 @@ export interface TransferCellSchedulesResult {
   conflictCount: number
 }
 
-function sortSchedulesByOrder(items: Schedule[]): Schedule[] {
-  return [...items].sort((a, b) => {
-    const ao = a.order ?? 0
-    const bo = b.order ?? 0
-    if (ao !== bo) return ao - bo
-    const at = a.createdAt instanceof Date ? a.createdAt.getTime() : new Date(a.createdAt).getTime()
-    const bt = b.createdAt instanceof Date ? b.createdAt.getTime() : new Date(b.createdAt).getTime()
-    return at - bt
-  })
-}
-
 function getSchedulesForCell(schedules: Schedule[], date: string, shiftId: string): Schedule[] {
-  return sortSchedulesByOrder(
+  return sortByOrder(
     schedules.filter((schedule) => schedule.date === date && schedule.shiftId === shiftId)
   )
 }

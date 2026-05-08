@@ -5,7 +5,7 @@
 
 import type { Worksheet } from 'exceljs'
 import type { Shift, Person, Schedule } from '@/types'
-import { formatDate, getMonthDates } from '@/utils'
+import { formatDate, getMonthDates, sortByOrder } from '@/utils'
 
 /**
  * 月度排班导出数据
@@ -75,26 +75,12 @@ export class ExcelExportService {
       // 按班次分组人员
       const shiftPeople: Record<string, string[]> = {}
       shifts.forEach(shift => {
-        const personIds = daySchedules
-          .filter(s => s.shiftId === shift.id)
-          .sort((a, b) => {
-            const ao = a.order ?? 0
-            const bo = b.order ?? 0
-            if (ao !== bo) return ao - bo
-            
-            // 处理createdAt可能是字符串或Date的情况
-            const getTimestamp = (d: any) => {
-              if (!d) return 0
-              if (d instanceof Date) return d.getTime()
-              if (typeof d === 'string') return new Date(d).getTime()
-              return 0
-            }
-            
-            return getTimestamp(a.createdAt) - getTimestamp(b.createdAt)
-          })
+        const sortedPersonIds = sortByOrder(
+          daySchedules.filter(s => s.shiftId === shift.id)
+        )
           .map(s => s.personId)
         
-        shiftPeople[shift.name] = personIds
+        shiftPeople[shift.name] = sortedPersonIds
           .map(id => peopleMap.get(id)?.name)
           .filter(Boolean) as string[]
       })

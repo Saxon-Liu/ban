@@ -118,6 +118,8 @@ export const AUTH_STORAGE_KEY = 'auth-token'
 export const AUTH_EXPIRY_KEY = 'auth-expiry'
 export const CUSTOM_KEY_STORAGE = 'custom-secret-key'
 export const AUTH_EXPIRY_HOURS = 24
+export const AUTO_LOGOUT_WARNING_MINUTES = 2
+export const AUTO_LOGOUT_TOTAL_MINUTES = 5
 
 /**
  * 安全配置（在此集中修改默认密码和恢复码）

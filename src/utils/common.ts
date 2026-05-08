@@ -46,12 +46,28 @@ export function getDateString(date: Date | string = new Date()): string {
 }
 
 /**
- * 获取星期几的中文名称
- * @param dayOfWeek - 星期几（0-6，0为周日）
+ * 按排序序号升序排序，序号相同时按创建时间升序
  */
-export function getWeekdayName(dayOfWeek: number): string {
-  const weekdays = ['周日', '周一', '周二', '周三', '周四', '周五', '周六']
-  return weekdays[dayOfWeek]
+export function sortByOrder<T extends { order?: number; createdAt?: Date | string }>(
+  items: T[],
+  options: { fallbackOrder?: number } = {}
+): T[] {
+  const { fallbackOrder = 0 } = options
+
+  const getTimestamp = (value?: Date | string) => {
+    if (!value) return 0
+    if (value instanceof Date) return value.getTime()
+
+    const parsed = new Date(value).getTime()
+    return Number.isNaN(parsed) ? 0 : parsed
+  }
+
+  return [...items].sort((a, b) => {
+    const ao = typeof a.order === 'number' ? a.order : fallbackOrder
+    const bo = typeof b.order === 'number' ? b.order : fallbackOrder
+    if (ao !== bo) return ao - bo
+    return getTimestamp(a.createdAt) - getTimestamp(b.createdAt)
+  })
 }
 
 /**

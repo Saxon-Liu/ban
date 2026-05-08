@@ -268,6 +268,7 @@ import {
   getAdaptiveTextColor,
   getNextMonth,
   getPreviousMonth,
+  sortByOrder,
 } from "@/utils";
 
 const props = withDefaults(
@@ -431,11 +432,8 @@ const loadBaseData = async () => {
     repositories.extraRestConfigs.getAll(),
   ]);
 
-  const sortFn = <T extends { order?: number }>(a: T, b: T) =>
-    (a.order ?? 999) - (b.order ?? 999);
-
-  people.value = [...peopleData].sort(sortFn);
-  shifts.value = [...shiftData].sort(sortFn);
+  people.value = sortByOrder(peopleData, { fallbackOrder: 999 });
+  shifts.value = sortByOrder(shiftData, { fallbackOrder: 999 });
   extraRestConfigs.value = new Map(
     extraRestConfigData.map((config) => [`${config.year}-${config.month}`, config])
   );

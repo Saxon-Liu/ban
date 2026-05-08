@@ -6,7 +6,7 @@
 import type { ShiftRepository } from './ShiftRepository'
 import type { Shift, CreateData, UpdateData } from '@/types'
 import { dbManager } from './IndexedDBManager'
-import { generateId, getCurrentDateTime } from '@/utils/common'
+import { generateId, getCurrentDateTime, sortByOrder } from '@/utils/common'
 //
 
 /**
@@ -14,11 +14,7 @@ import { generateId, getCurrentDateTime } from '@/utils/common'
  */
 export class IndexedDBShiftRepository implements ShiftRepository {
   private sortShifts(list: Shift[]): Shift[] {
-    return [...list].sort((a: any, b: any) => {
-      const ao = typeof a.order === 'number' ? a.order : Number(new Date(a.createdAt))
-      const bo = typeof b.order === 'number' ? b.order : Number(new Date(b.createdAt))
-      return ao - bo
-    })
+    return sortByOrder(list, { fallbackOrder: Number.MAX_SAFE_INTEGER })
   }
 
   /**

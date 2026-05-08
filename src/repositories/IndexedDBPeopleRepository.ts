@@ -6,7 +6,7 @@
 import type { PeopleRepository } from './PeopleRepository'
 import type { Person, PersonStatistics, PersonWithStatistics, CreateData, UpdateData, Shift } from '@/types'
 import { dbManager } from './IndexedDBManager'
-import { generateId, getCurrentDateTime, getDateString } from '@/utils/common'
+import { generateId, getCurrentDateTime, getDateString, sortByOrder } from '@/utils/common'
 import { DEFAULT_COLORS } from '@/utils/constants'
 import { buildPersonStatistics, getRestShiftId } from '@/services/scheduleStatistics'
 
@@ -15,11 +15,7 @@ import { buildPersonStatistics, getRestShiftId } from '@/services/scheduleStatis
  */
 export class IndexedDBPeopleRepository implements PeopleRepository {
   private sortPeople(list: Person[]): Person[] {
-    return [...list].sort((a: any, b: any) => {
-      const ao = typeof a.order === 'number' ? a.order : Number(new Date(a.createdAt))
-      const bo = typeof b.order === 'number' ? b.order : Number(new Date(b.createdAt))
-      return ao - bo
-    })
+    return sortByOrder(list, { fallbackOrder: Number.MAX_SAFE_INTEGER })
   }
 
   /**

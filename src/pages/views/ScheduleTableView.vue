@@ -304,6 +304,7 @@ import {
   getAdaptiveTextColor,
   getMonthDates,
   formatDate,
+  sortByOrder,
 } from "@/utils";
 
 const props = withDefaults(
@@ -402,14 +403,8 @@ const scheduleCellMap = computed(() => {
   }
 
   for (const bucket of map.values()) {
-    bucket.sort((a, b) => {
-      const ao = a.order ?? 0;
-      const bo = b.order ?? 0;
-      if (ao !== bo) return ao - bo;
-      const at = a.createdAt?.getTime?.() ? a.createdAt.getTime() : 0;
-      const bt = b.createdAt?.getTime?.() ? b.createdAt.getTime() : 0;
-      return at - bt;
-    });
+    const sorted = sortByOrder(bucket);
+    bucket.splice(0, bucket.length, ...sorted);
   }
 
   return map;
@@ -471,6 +466,12 @@ const calculatePersonStatistics = (personId: string, month: string) => {
     extraRestDays: extraRestDaysForCurrentMonth.value,
     restShiftId: restShiftId.value,
   });
+};
+
+const loadMonthSchedules = async () => {
+  if (!currentMonth.value) return;
+
+  schedules.value = await repositories.schedules.getByMonth(currentMonth.value);
 };
 
 const setMonth = async (month: string) => {
@@ -745,7 +746,7 @@ const handleCellDrop = async (
       }
       ElMessage.success(msg);
 
-      await loadData();
+      await loadMonthSchedules();
       handleDragEnd();
       return;
     }
@@ -809,7 +810,7 @@ const handleCellDrop = async (
     }
 
     ElMessage.success("排班成功");
-    await loadData();
+    await loadMonthSchedules();
   } catch (error) {
     console.error("排班失败:", error);
     ElMessage.error("排班失败");
@@ -838,7 +839,7 @@ const handleTagReorder = async (
   if (!changed) return;
 
   ElMessage.success("已更新排序");
-  await loadData();
+  await loadMonthSchedules();
 };
 
 const handleCellHandleDragStart = (
@@ -961,7 +962,7 @@ const removeSchedule = async (
     );
     if (removed) {
       ElMessage.success("删除排班成功");
-      await loadData();
+      await loadMonthSchedules();
     }
   } catch (error) {
     console.error("删除排班失败:", error);
