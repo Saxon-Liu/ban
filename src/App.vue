@@ -1,6 +1,7 @@
 <template>
   <div id="app">
-    <el-container>
+    <router-view v-if="isLoginPage" />
+    <el-container v-else>
       <el-aside :width="asideCollapsed ? '0px' : asideWidth + 'px'" :class="['app-aside', { collapsed: asideCollapsed }]">
         <div class="aside-top">
           <el-button size="small" circle @click="toggleAside">
@@ -23,32 +24,22 @@
           </el-menu-item>
           <el-menu-item index="/dashboard">
             <el-icon><Tools /></el-icon>
-            <!-- <el-icon>
-              <Setting />
-            </el-icon> -->
             <span>基础配置</span>
           </el-menu-item>
-          <!-- <el-menu-item index="/people">
-            <el-icon><User /></el-icon>
-            <span>人员管理</span>
-          </el-menu-item>
-          <el-menu-item index="/shifts">
-            <el-icon><Clock /></el-icon>
-            <span>班次管理</span>
-          </el-menu-item>
-          <el-menu-item index="/extra-rest">
-            <el-icon><Setting /></el-icon>
-            <span>额外休息配置</span>
-          </el-menu-item> -->
           </el-menu>
         </transition>
         <transition name="fade">
-          <div class="theme-switcher" v-show="!asideCollapsed">
-          <el-select v-model="themeMode" size="small" style="width: 160px">
-            <el-option label="跟随系统" value="system" />
-            <el-option label="亮色" value="light" />
-            <el-option label="暗色" value="dark" />
-          </el-select>
+          <div class="aside-bottom" v-show="!asideCollapsed">
+            <el-select v-model="themeMode" size="small" style="flex: 1">
+              <el-option label="跟随系统" value="system" />
+              <el-option label="亮色" value="light" />
+              <el-option label="暗色" value="dark" />
+            </el-select>
+            <el-tooltip content="退出登录" placement="top">
+              <el-button plain size="small" circle @click="handleLogout">
+                <el-icon><SwitchButton /></el-icon>
+              </el-button>
+            </el-tooltip>
           </div>
         </transition>
         <div v-show="!asideCollapsed" class="aside-resizer" @mousedown="startAsideResize"></div>
@@ -66,8 +57,21 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
-import { Calendar, Tools, Fold, Expand } from '@element-plus/icons-vue'
+import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { Calendar, Tools, Fold, Expand, SwitchButton } from '@element-plus/icons-vue'
+import { AUTH_STORAGE_KEY, AUTH_EXPIRY_KEY } from '@/utils/constants'
+
+const route = useRoute()
+const router = useRouter()
+
+const isLoginPage = computed(() => route.path === '/login')
+
+const handleLogout = () => {
+  localStorage.removeItem(AUTH_STORAGE_KEY)
+  localStorage.removeItem(AUTH_EXPIRY_KEY)
+  router.push('/login')
+}
 
 const THEME_KEY = 'theme-mode'
 const themeMode = ref<'system' | 'light' | 'dark'>('system')
@@ -224,10 +228,14 @@ body {
   padding: 20px;
 }
 
-.theme-switcher {
+.aside-bottom {
   position: absolute;
   left: 10px;
+  right: 10px;
   bottom: 10px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 .aside-top {

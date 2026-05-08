@@ -110,3 +110,25 @@ export const WEEKDAY_NAMES = [
   '周五',
   '周六',
 ] as const
+
+/**
+ * 登录认证相关常量
+ */
+export const AUTH_STORAGE_KEY = 'auth-token'
+export const AUTH_EXPIRY_KEY = 'auth-expiry'
+export const CUSTOM_KEY_STORAGE = 'custom-secret-key'
+export const AUTH_EXPIRY_HOURS = 24
+
+/**
+ * 安全配置（在此集中修改默认密码和恢复码）
+ */
+export const SECURITY_CONFIG = {
+  DEFAULT_KEY: '0519',
+  RESET_CODE: '519519',
+}
+
+/**
+ * 兼容导出（供现有代码使用）
+ */
+export const DEFAULT_KEY = SECURITY_CONFIG.DEFAULT_KEY
+export const RESET_CODE = SECURITY_CONFIG.RESET_CODE

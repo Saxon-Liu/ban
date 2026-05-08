@@ -41,6 +41,18 @@
           </div>
         </div>
 
+        <div class="action-item">
+          <div class="action-info">
+            <h3>修改密码</h3>
+            <p>修改登录系统的密钥。需要输入当前密码才能修改。</p>
+          </div>
+          <div class="action-controls">
+            <el-button type="success" @click="showChangePasswordDialog = true">
+              修改密码
+            </el-button>
+          </div>
+        </div>
+
         <div class="action-item danger">
           <div class="action-info">
             <h3>初始化系统（高危）</h3>
@@ -63,17 +75,55 @@
       style="display: none"
       @change="handleFileChange"
     />
+
+    <el-dialog
+      v-model="showChangePasswordDialog"
+      title="修改密码"
+      width="400px"
+      :close-on-click-modal="false"
+    >
+      <el-form
+        ref="passwordFormRef"
+        :model="passwordForm"
+        :rules="passwordRules"
+        label-width="90px"
+        label-position="right"
+      >
+        <el-form-item label="新密码" prop="newPassword">
+          <el-input
+            v-model="passwordForm.newPassword"
+            type="password"
+            show-password
+            placeholder="请输入新密码"
+          />
+        </el-form-item>
+        <el-form-item label="确认新密码" prop="confirmPassword">
+          <el-input
+            v-model="passwordForm.confirmPassword"
+            type="password"
+            show-password
+            placeholder="请再次输入新密码"
+          />
+        </el-form-item>
+      </el-form>
+      <template #footer>
+        <el-button @click="showChangePasswordDialog = false">取消</el-button>
+        <el-button type="primary" @click="handleChangePassword" :loading="changingPassword">
+          确定
+        </el-button>
+      </template>
+    </el-dialog>
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref } from "vue";
+import { ref, reactive } from "vue";
 import { ElLoading, ElMessage, ElMessageBox } from "element-plus";
 import { repositories } from "@/repositories";
 import { dbManager } from "@/repositories/IndexedDBManager";
 import { getCurrentDateTime } from "@/utils/common";
 import { initializeDefaultShifts } from "@/services/initialization";
-import { DEFAULT_SHIFTS } from "@/utils";
+import { DEFAULT_SHIFTS, DEFAULT_KEY, CUSTOM_KEY_STORAGE } from "@/utils";
 import type { Shift, Schedule } from "@/types";
 import type { LoadingInstance } from "element-plus/es/components/loading/src/loading";
 
@@ -83,6 +133,71 @@ const exportSchedules = ref(true);
 const importArchivedPeople = ref(false);
 const replaceAllBeforeImport = ref(false);
 let reinitializeLoading: LoadingInstance | null = null;
+
+const getCorrectKey = () => {
+  return localStorage.getItem(CUSTOM_KEY_STORAGE) || DEFAULT_KEY
+}
+
+const showChangePasswordDialog = ref(false)
+const changingPassword = ref(false)
+const passwordFormRef = ref()
+const passwordForm = reactive({
+  newPassword: '',
+  confirmPassword: '',
+})
+
+const validateNewPassword = (_rule: any, value: string, callback: any) => {
+  if (!value) {
+    callback(new Error('请输入新密码'))
+  } else if (value.length < 4) {
+    callback(new Error('密码长度不能少于4位'))
+  } else if (value === getCorrectKey()) {
+    callback(new Error('新密码不能与当前密码相同'))
+  } else {
+    callback()
+  }
+}
+
+const validateConfirmPassword = (_rule: any, value: string, callback: any) => {
+  if (!value) {
+    callback(new Error('请再次输入新密码'))
+  } else if (value !== passwordForm.newPassword) {
+    callback(new Error('两次输入的新密码不一致'))
+  } else {
+    callback()
+  }
+}
+
+const passwordRules = {
+  newPassword: [{ validator: validateNewPassword, trigger: 'blur' }],
+  confirmPassword: [{ validator: validateConfirmPassword, trigger: 'blur' }],
+}
+
+/**
+ * 修改密码
+ */
+const handleChangePassword = async () => {
+  if (!passwordFormRef.value) return
+  try {
+    await passwordFormRef.value.validate()
+  } catch {
+    return
+  }
+
+  changingPassword.value = true
+  try {
+    localStorage.setItem(CUSTOM_KEY_STORAGE, passwordForm.newPassword)
+    ElMessage.success('密码修改成功，下次登录请使用新密码')
+    showChangePasswordDialog.value = false
+    passwordForm.newPassword = ''
+    passwordForm.confirmPassword = ''
+  } catch (error) {
+    console.error('修改密码失败:', error)
+    ElMessage.error('修改密码失败')
+  } finally {
+    changingPassword.value = false
+  }
+}
 
 const normalizeShifts = (shifts: Shift[] = []) => {
   const defaultRestShift = DEFAULT_SHIFTS.find((shift) => shift.isRest);
@@ -170,20 +285,39 @@ const handleExport = async () => {
   }
 };
 
+const reinitializeResetPassword = ref(false)
+
 const handleReinitialize = async () => {
+  const confirmMessage = `确认 <strong style="color: var(--el-color-danger);">删除所有数据并重新初始化系统</strong>？<br/>该操作 <strong style="color: var(--el-color-danger);">不可撤销</strong>，请确保已备份。`
+  
   try {
-    await ElMessageBox.confirm(
-      `确认 <strong style="color: var(--el-color-danger);">删除所有数据并重新初始化系统</strong>？<br/>该操作 <strong style="color: var(--el-color-danger);">不可撤销</strong>，请确保已备份。`,
-      "初始化系统",
-      {
-        confirmButtonText: "确认初始化",
-        cancelButtonText: "取消",
-        confirmButtonClass: "el-button--danger",
-        cancelButtonClass: "el-button--primary",
-        dangerouslyUseHTMLString: true,
-        type: "warning",
-      }
-    );
+    await new Promise<void>((resolve, reject) => {
+      ElMessageBox.confirm(
+        `<div style="display: flex; flex-direction: column; gap: 12px;">
+          <div>${confirmMessage}</div>
+          <div style="display: flex; align-items: center; gap: 8px;">
+            <input type="checkbox" id="reset-pwd" style="width: 16px; height: 16px; cursor: pointer;">
+            <label for="reset-pwd" style="cursor: pointer; user-select: none; font-size: 14px;">同时重置登录密码为默认值</label>
+          </div>
+        </div>`,
+        "初始化系统",
+        {
+          confirmButtonText: "确认初始化",
+          cancelButtonText: "取消",
+          confirmButtonClass: "el-button--danger",
+          cancelButtonClass: "el-button--primary",
+          dangerouslyUseHTMLString: true,
+          type: "warning",
+          beforeClose: (action, _instance, done) => {
+            if (action === 'confirm') {
+              const checkbox = document.getElementById('reset-pwd') as HTMLInputElement
+              reinitializeResetPassword.value = checkbox ? checkbox.checked : false
+            }
+            done()
+          }
+        }
+      ).then(() => resolve()).catch(() => reject())
+    })
   } catch {
     return;
   }
@@ -197,7 +331,12 @@ const handleReinitialize = async () => {
   try {
     await dbManager.deleteDatabase();
     await initializeDefaultShifts();
-    ElMessage.success("系统已重新初始化，页面即将刷新");
+    if (reinitializeResetPassword.value) {
+      localStorage.removeItem(CUSTOM_KEY_STORAGE);
+      ElMessage.success("系统已重新初始化，登录密码已重置为默认值，页面即将刷新");
+    } else {
+      ElMessage.success("系统已重新初始化，页面即将刷新");
+    }
     setTimeout(() => window.location.reload(), 1200);
   } catch (error) {
     console.error("系统初始化失败", error);
