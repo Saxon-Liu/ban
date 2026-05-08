@@ -321,7 +321,7 @@ onBeforeUnmount(() => {
 
 <style lang="scss" scoped>
 .shifts-page {
-  height: 100%;
+  height: calc(100% - 2px);
   
   .el-card {
     height: 100%;

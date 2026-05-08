@@ -1,207 +1,340 @@
 # 排班管理系统
 
-基于Vue3 + TypeScript的排班管理系统，支持拖拽排班、实时保存、Excel导出等功能。
+基于 `Vue 3 + TypeScript + Element Plus + IndexedDB + Electron` 的单仓库排班系统。
 
-## 🎯 功能特性
+当前仓库同时承载：
 
-### 核心功能
+- Web 开发与构建
+- Electron 桌面开发运行
+- Windows 桌面程序打包
+- 本地配置导入导出与离线数据持久化
 
-- **人员管理**: 管理员工信息（姓名、颜色、基础月休天数）
-- **班次管理**: 管理班次信息（早班、晚班、长白班、休等）
-- **拖拽排班**: 直观的拖拽式排班界面
-- **实时统计**: 实时显示员工剩余未排休天数
-- **额外休息配置**: 配置每月额外休息天数
-- **Excel导出**: 一键导出排班表到Excel
-- **按人员排班视图**: 支持人员卡片式日历，快速对比个人排班、剩余假期，并在同一界面内切换前后月份
-- **安全清空工具**: 支持一键清空当前月份的所有排班，或在人员视图中单独清理某位员工的当月排班
+## 项目定位
 
-### 技术特点
+这是一个本地优先的排班工具，核心数据保存在浏览器或 Electron 容器内的 IndexedDB 中，不依赖后端服务即可完成日常排班、人员维护、班次维护、配置备份和桌面打包发布。
 
-- **离线使用**: 基于IndexedDB，无需网络即可使用
-- **实时保存**: 所有操作自动保存，无需手动保存
-- **响应式设计**: 适配各种屏幕尺寸
-- **类型安全**: 完整的TypeScript类型定义
-- **模块化架构**: 易于扩展和维护
+当前仓库是唯一主仓库，不再依赖外部 `electron-shell` 壳项目。
 
-## 🛠 技术栈
+## 主要功能
 
-- **前端框架**: Vue3 + TypeScript
-- **构建工具**: Vite
-- **UI组件库**: Element Plus
-- **数据存储**: IndexedDB (可插拔架构)
-- **拖拽库**: vuedraggable
-- **Excel导出**: xlsx (SheetJS)
-- **日期处理**: dayjs
-- **工具库**: lodash-es
+### 业务功能
 
-## 📁 项目结构
+- 人员管理：新增、编辑、导入、导出、归档人员
+- 班次管理：新增、编辑、归档班次
+- 排班管理：按月份进行拖拽排班、查看、修改、删除
+- 人员视图：按人员维度查看月度排班和休息统计
+- 额外休息配置：按月份配置补休/额外休息天数
+- 配置管理：导出配置、导入配置、修改登录密码、系统初始化
+- Excel 导出：导出月度排班表
 
+### 当前关键规则
+
+- 人员删除已调整为“归档”语义
+  归档后仅从后续排班和人员列表中隐藏，历史排班保留
+- 若人员已有未来排班，归档时会自动清理“今天及未来”的待执行排班
+- 后续重新添加同名人员，会被视为一个新的人员档案，不复用旧身份
+- 班次同样采用归档策略
+  历史排班可保留，但归档班次不再用于后续排班
+- 导入配置支持两种思路
+  默认按 ID 合并导入，也可选择导入前清空现有数据进行覆盖恢复
+
+### 登录与会话
+
+- 使用本地密钥登录
+- 支持恢复码重置密码
+- 支持滑动窗口续期，避免用户持续操作中被动退出
+- 自动退出相关配置当前已在配置页隐藏，但底层会话机制仍保留
+
+## 技术栈
+
+- 前端：`Vue 3`、`TypeScript`
+- 构建：`Vite`
+- UI：`Element Plus`
+- 路由：`vue-router`
+- 本地存储：`IndexedDB` + `idb`
+- 拖拽：`vuedraggable`、`sortablejs`
+- 导出：`exceljs`、`xlsx`
+- 桌面端：`Electron 28`
+- 打包：`electron-builder`
+
+## 目录结构
+
+```text
+.
+├─ electron/                  Electron 主进程、preload、日志
+├─ resources/                 Electron 图标资源
+├─ src/
+│  ├─ composables/            组合式逻辑
+│  ├─ pages/                  页面与业务视图
+│  │  └─ views/               排班相关子视图
+│  ├─ repositories/           Repository 抽象与 IndexedDB 实现
+│  ├─ services/               业务服务、初始化、统计、导出
+│  ├─ types/                  类型定义
+│  └─ utils/                  常量、鉴权、日期、通用工具
+├─ electron-builder.yml       Electron 打包配置
+├─ vite.config.ts             Vite 与 Electron 集成配置
+├─ tsconfig.electron.json     Electron 侧类型检查配置
+└─ package.json               统一脚本入口
 ```
-src/
-├── components/         # 通用组件
-├── pages/             # 页面组件
-│   ├── Schedule.vue   # 排班页面（核心功能）
-│   ├── People.vue     # 人员管理页面
-│   ├── Shifts.vue     # 班次管理页面
-│   └── ExtraRest.vue  # 额外休息配置页面
-├── repositories/      # Repository层（数据访问）
-│   ├── IndexedDBManager.ts              # IndexedDB管理器
-│   ├── IndexedDBPeopleRepository.ts     # 人员Repository实现
-│   ├── IndexedDBShiftRepository.ts      # 班次Repository实现
-│   ├── IndexedDBScheduleRepository.ts   # 排班记录Repository实现
-│   └── IndexedDBExtraRestConfigRepository.ts # 额外休息配置Repository实现
-├── services/         # 业务逻辑服务层
-│   ├── initialization.ts  # 系统初始化服务
-│   └── excelExport.ts    # Excel导出服务
-├── types/            # TypeScript类型定义
-│   └── index.ts      # 所有类型定义
-├── utils/            # 工具函数
-│   ├── common.ts     # 通用工具函数
-│   ├── constants.ts  # 常量定义
-│   ├── date.ts       # 日期工具函数
-│   └── index.ts      # 工具模块导出
-└── main.ts           # 应用入口文件
-```
 
-## 🚀 快速开始
+## 环境要求
 
-### 环境要求
+- Node.js 18 及以上
+- npm 9 及以上
+- Windows x64
 
-- Node.js 14.21.3 或更高版本
-- npm 或 pnpm
-
-### 安装依赖
+## 安装依赖
 
 ```bash
 npm install
 ```
 
-### 开发环境启动
+## 开发命令
+
+### Web 开发
 
 ```bash
 npm run dev
 ```
 
-### 构建生产版本
+仅启动 Vite Web 开发服务。
+
+### Electron 开发
+
+```bash
+npm run dev:electron
+```
+
+自动完成以下动作：
+
+1. 启动 Vite 开发服务
+2. 构建并监听 `electron/main.ts`
+3. 构建并监听 `electron/preload.ts`
+4. 启动 Electron 桌面窗口
+
+## 构建命令
+
+### 仅构建 Web
 
 ```bash
 npm run build
 ```
 
-### 类型检查
+输出目录：
+
+- `dist/`
+
+### 构建桌面运行输入
 
 ```bash
-npm run type-check
+npm run build:desktop
 ```
 
-## 📖 使用说明
+输出目录：
 
-### 1. 人员管理
+- `dist/`
+- `dist-electron/`
 
-- 进入"人员管理"页面
-- 点击"新增人员"按钮添加新员工
-- 系统会自动从颜色池中选择颜色，也支持自定义
-- 设置基础月休天数（默认8天）
-- 删除人员时会自动清理相关排班记录
+### 打包桌面产物
 
-### 2. 班次管理
+```bash
+npm run build:portable
+npm run build:setup
+npm run build:green
+npm run build:all
+```
 
-- 进入"班次管理"页面
-- 系统预设了四个默认班次：早班、晚班、长白班、休
-- "休"班次不可删除和重命名
-- 支持新增、编辑、删除自定义班次
-- 删除班次时会自动清理相关排班记录
+这些命令都已经内置前置构建，不需要额外手动先执行 `npm run build`。
 
-### 3. 排班操作
+命令说明：
 
-- 进入"排班管理"页面（首页）
-- 左侧显示所有员工及其剩余未排休天数
-- 右侧显示当月排班表格
-- **拖拽排班**: 从左侧拖拽员工到右侧单元格
-- **删除排班**: 点击单元格，在弹出的详情中删除
-- **切换月份**: 使用顶部的月份选择器
-- **快速跳月**: 通过上一月/下一月按钮在不同月份间切换
-- **导出Excel**: 点击"导出Excel"按钮
-- **清空排班**: 支持一键清空当前月份全部排班，或在人员卡片中清空某位员工当月排班
+- `build:portable`：生成便携版 `exe`
+- `build:setup`：生成安装版 `exe`
+- `build:green`：生成绿色版 `zip`
+- `build:all`：一次生成全部桌面产物
+- `pack:dir`：仅生成 `win-unpacked` 目录，便于调试桌面构建结果
 
-### 4. 额外休息配置
+## 打包产物
 
-- 进入"额外休息配置"页面
-- 选择年份，配置每月的额外休息天数
-- 额外休息天数会加到员工的基础月休天数上
-- 修改后实时保存并影响统计计算
+Electron 打包输出位于：
 
-## 🔧 核心功能详解
+```text
+release/<version>/
+```
 
-### 拖拽排班机制
+例如当前版本可能输出：
 
-- 支持从人员列表拖拽员工到排班表格
-- 支持在同一表格内移动排班（拖拽已排班的员工）
-- 自动验证：员工一天只能有一个班次
-- 超额排休提醒：当员工剩余休息天数为负时弹出确认
+- `班-1.2.0-便携版.exe`
+- `班-1.2.0-安装版.exe`
+- `班-1.2.0-绿色版.zip`
 
-### 实时统计计算
+说明：
 
-- 应休天数 = 基础月休天数 + 当月额外休息天数
-- 已排休天数 = 当月"休"班次的排班数量
-- 剩余未排休天数 = 应休天数 - 已排休天数
-- 当剩余天数为负时显示"已超休"并用红色标记
+- `dist/` 是前端构建输出，也是 Electron 打包输入
+- `dist-electron/` 是 Electron 主进程与 preload 构建输出
+- `release/` 是最终桌面发布产物目录
 
-### Excel导出功能
+## Git 与发布约定
 
-- 导出的Excel文件包含一个工作表
-- 行表示日期，列表示班次
-- 单元格内多个员工用换行符分隔
-- 文件名格式：YYYY-MM排班表.xlsx
+以下目录属于构建产物，不应提交到 Git：
 
-## 🏗 架构设计
+- `dist/`
+- `dist-electron/`
+- `release/`
 
-### Repository模式
+GitHub 仓库提交源码、配置和资源即可。
 
-采用Repository模式实现数据访问层的抽象：
+真正用于发布到 GitHub Releases 的文件，是 `release/<version>/` 下的 `exe` / `zip` 产物，而不是 `dist/`。
 
-- **BaseRepository**: 定义基础CRUD操作接口
-- **专用Repository**: 扩展特定业务逻辑的查询方法
-- **IndexedDB实现**: 提供离线数据存储能力
-- **可插拔架构**: 未来可轻松切换为后端API或其他存储
+## 数据存储与备份
 
-### 组件设计原则
+### 本地数据位置
 
-- **单一职责**: 每个组件只负责一个功能
-- **类型安全**: 完整的TypeScript类型定义
-- **代码注释**: 详细的函数和类型注释
-- **错误处理**: 完善的错误捕获和用户提示
+业务数据默认存储在 IndexedDB 中。
 
-### 数据流设计
+- 浏览器模式：存储在当前浏览器本地
+- Electron 模式：存储在桌面应用容器环境中
 
-- **单向数据流**: 父组件通过props传递数据，子组件通过events通信
-- **状态管理**: 使用Vue3的响应式系统管理组件状态
-- **实时同步**: 所有数据操作实时保存到IndexedDB
+### 建议备份方式
 
-## 🔍 开发规范
+推荐定期使用“配置管理”中的导出能力做本地备份：
 
-### 命名规范
+- 可导出人员、班次、额外休息配置
+- 可选同时导出排班记录
+- 导入时可选择合并导入或清空后恢复
 
-- **组件文件**: PascalCase（如：SchedulePage.vue）
-- **工具函数**: camelCase（如：formatDate）
-- **常量**: UPPER_SNAKE_CASE（如：DEFAULT_COLORS）
-- **类型接口**: PascalCase（如：PersonStatistics）
+## 配置导入导出规则
 
-### 代码风格
+### 导出
 
-- 使用2个空格缩进
-- 使用单引号
-- 添加分号
-- 详细的代码注释
+- 支持导出当前配置为 JSON
+- 可选择是否同时导出排班记录
 
-### 错误处理
+### 导入
 
-- 所有异步操作都需要try-catch
-- 用户操作失败时显示友好的错误提示
-- 控制台记录详细的错误信息便于调试
+默认行为：
 
-## 📝 注意事项
+- 仅导入活动人员
+- 按 ID 合并
+- 不破坏本地已有归档历史
 
-1. **数据备份**: IndexedDB数据存储在浏览器本地，建议定期导出Excel备份
-2. **浏览器兼容性**: 推荐使用现代浏览器（Chrome、Firefox、Safari、Edge）
-3. **数据同步**: 目前不支持多设备同步，数据仅保存在当前浏览器
+可选行为：
+
+- 包含归档人员
+- 导入前清空现有数据
+
+如果希望做完整恢复，建议：
+
+1. 先确认备份文件正确
+2. 勾选“导入前清空现有数据”
+3. 再执行导入
+
+## 权限与安全说明
+
+- 默认使用本地密钥登录
+- 支持自定义密码与恢复码重置
+- Electron 模式下启用了 `contextIsolation: true`
+- `nodeIntegration` 关闭
+- 通过 preload 暴露白名单 API
+- 主进程限制外部请求并注入 CSP
+
+当前 preload 暴露的接口以桌面容器能力为主，包括：
+
+- `getAppContext`
+- `getVersion`
+- `exportLog`
+
+## 架构说明
+
+### Repository 层
+
+数据访问采用 Repository 模式，便于隔离业务逻辑与存储实现。
+
+- `PeopleRepository`
+- `ShiftRepository`
+- `ScheduleRepository`
+- `ExtraRestConfigRepository`
+
+当前默认实现为 IndexedDB，后续若需要切换到服务端 API，可以在这一层替换。
+
+### Service 层
+
+业务规则集中在 `src/services/`：
+
+- `initialization.ts`：系统初始化
+- `scheduleService.ts`：排班写入与规则校验
+- `scheduleStatistics.ts`：排班统计
+- `excelExport.ts`：Excel 导出
+
+### Electron 层
+
+Electron 侧保留了独立桌面能力：
+
+- 单实例锁
+- 桌面窗口创建与尺寸约束
+- preload 白名单桥接
+- 日志记录与导出
+- 渲染进程异常日志
+- 开发态加载本地 dev server
+- 生产态加载 `dist/index.html`
+
+## 常见开发流程
+
+### 修改 Vue 业务代码后验证网页
+
+```bash
+npm run dev
+```
+
+或：
+
+```bash
+npm run build
+```
+
+### 修改 Vue 业务代码后打包桌面程序
+
+直接执行：
+
+```bash
+npm run build:all
+```
+
+不需要先手动执行 `npm run build`。
+
+### 修改 Electron 主进程或 preload 后调试
+
+```bash
+npm run dev:electron
+```
+
+### 仅验证桌面构建输入是否正常
+
+```bash
+npm run build:desktop
+```
+
+## 当前页面组成
+
+- `Login.vue`：登录页
+- `Schedule.vue`：排班主页面
+- `Dashboard.vue`：基础配置承载页
+- `People.vue`：人员管理
+- `Shifts.vue`：班次管理
+- `ExtraRest.vue`：额外休息配置
+- `ConfigManagement.vue`：配置管理
+
+## 注意事项
+
+1. 这是本地优先项目，不提供多端实时同步能力
+2. 归档是保留历史的业务动作，不等于物理删除
+3. 归档后的人员或班次可能仍出现在历史排班中，这是预期行为
+4. 若做正式发布，请从 `release/<version>/` 中取最终产物
+5. 若桌面打包时绿色版压缩失败，先确认没有正在占用生成中的 `班.exe`
+
+## 后续可扩展方向
+
+- GitHub Actions 自动打包发布
+- 导入导出结构版本化
+- 更细粒度的排班规则校验
+- 多人协同或服务端同步模式

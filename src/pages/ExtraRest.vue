@@ -149,7 +149,7 @@ onMounted(() => {
 
 <style lang="scss" scoped>
 .extra-rest-page {
-  height: 100%;
+  height: calc(100% - 2px);
   
   .el-card {
     height: 100%;

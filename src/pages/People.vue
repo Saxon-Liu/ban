@@ -527,7 +527,7 @@ const handleImportFileChange = async (e: Event) => {
 
 <style lang="scss" scoped>
 .people-page {
-  height: 100%;
+  height: calc(100% - 2px);
   /* min-height: 300px; Remove explicit min-height to allow flex shrinking if needed, or keep if desired */
   
   .el-card {
