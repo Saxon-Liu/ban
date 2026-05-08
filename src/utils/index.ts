@@ -17,10 +17,21 @@ export {
 
 export {
   clearAuthSession,
+  invalidateAuthSessions,
   isAuthSessionValid,
   refreshAuthSessionExpiry,
   startAuthSession,
 } from './auth'
+
+export {
+  clearCustomSecret,
+  getAuthCredentialVersion,
+  getStoredSecretHash,
+  hashSecret,
+  setCustomSecret,
+  verifyLoginSecret,
+  verifyResetCode,
+} from './credentials'
 
 // 日期工具函数
 export { 
@@ -44,10 +55,12 @@ export {
   DATE_FORMATS, 
   DRAG_TYPES, 
   WEEKDAY_NAMES,
-  DEFAULT_KEY,
   CUSTOM_KEY_STORAGE,
+  DEFAULT_KEY,
+  AUTH_CREDENTIAL_VERSION_KEY,
   AUTH_STORAGE_KEY,
   AUTH_EXPIRY_KEY,
+  AUTH_SESSION_VERSION_KEY,
   AUTH_EXPIRY_HOURS,
   AUTO_LOGOUT_WARNING_MINUTES,
   AUTO_LOGOUT_TOTAL_MINUTES,
@@ -55,4 +68,5 @@ export {
   AUTO_LOGOUT_WARNING_KEY,
   AUTO_LOGOUT_TOTAL_KEY,
   RESET_CODE,
+  SECURITY_CONFIG,
 } from './constants'
