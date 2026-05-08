@@ -2,13 +2,14 @@ import { onBeforeUnmount, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import {
-  AUTH_EXPIRY_KEY,
-  AUTH_STORAGE_KEY,
   AUTO_LOGOUT_ENABLED_KEY,
   AUTO_LOGOUT_TOTAL_KEY,
   AUTO_LOGOUT_TOTAL_MINUTES,
   AUTO_LOGOUT_WARNING_KEY,
   AUTO_LOGOUT_WARNING_MINUTES,
+  clearAuthSession,
+  isAuthSessionValid,
+  refreshAuthSessionExpiry,
 } from '@/utils'
 
 const ACTIVITY_EVENTS: Array<keyof DocumentEventMap> = [
@@ -44,13 +45,6 @@ export function useAutoLogout() {
   let warningVisible = false
   let closingForActivity = false
 
-  const isAuthenticated = () => {
-    const token = localStorage.getItem(AUTH_STORAGE_KEY)
-    const expiry = Number(localStorage.getItem(AUTH_EXPIRY_KEY))
-
-    return Boolean(token) && Number.isFinite(expiry) && Date.now() <= expiry
-  }
-
   const clearTimers = () => {
     if (warningTimer) {
       clearTimeout(warningTimer)
@@ -72,8 +66,7 @@ export function useAutoLogout() {
   const logout = async (message?: string) => {
     clearTimers()
     closeWarning()
-    localStorage.removeItem(AUTH_STORAGE_KEY)
-    localStorage.removeItem(AUTH_EXPIRY_KEY)
+    clearAuthSession()
     if (message) {
       ElMessage.warning(message)
     }
@@ -84,7 +77,7 @@ export function useAutoLogout() {
 
   const resetTimers = () => {
     clearTimers()
-    if (route.path === '/login' || !isAuthenticated()) return
+    if (route.path === '/login' || !isAuthSessionValid()) return
     const config = getAutoLogoutConfig()
     if (!config.enabled) return
 
@@ -104,7 +97,7 @@ export function useAutoLogout() {
   }
 
   const showWarning = async () => {
-    if (warningVisible || route.path === '/login' || !isAuthenticated()) return
+    if (warningVisible || route.path === '/login' || !isAuthSessionValid()) return
     const config = getAutoLogoutConfig()
     if (!config.enabled) return
 
@@ -137,11 +130,12 @@ export function useAutoLogout() {
   }
 
   const handleActivity = () => {
-    if (route.path === '/login' || !isAuthenticated()) return
+    if (route.path === '/login' || !isAuthSessionValid()) return
 
     if (warningVisible) {
       closeWarning()
     }
+    refreshAuthSessionExpiry()
     resetTimers()
   }
 
@@ -167,6 +161,9 @@ export function useAutoLogout() {
         clearTimers()
         closeWarning()
         return
+      }
+      if (isAuthSessionValid()) {
+        refreshAuthSessionExpiry()
       }
       resetTimers()
     },
