@@ -66,7 +66,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, watch } from 'vue'
+import { ref, onMounted, onBeforeUnmount, watch } from 'vue'
 import { Calendar, Tools, Fold, Expand } from '@element-plus/icons-vue'
 
 const THEME_KEY = 'theme-mode'
@@ -75,6 +75,8 @@ const ASIDE_WIDTH_KEY = 'aside-width'
 const ASIDE_COLLAPSE_KEY = 'aside-collapsed'
 const asideWidth = ref(200)
 const asideCollapsed = ref(true)
+let media: MediaQueryList | null = null
+let mediaChangeHandler: (() => void) | null = null
 
 const isSystemDark = () => window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
 const applyTheme = () => {
@@ -116,9 +118,15 @@ onMounted(() => {
       stack: error?.stack,
     })
   }
-  const media = window.matchMedia('(prefers-color-scheme: dark)')
-  const handler = () => themeMode.value === 'system' && applyTheme()
-  media.addEventListener('change', handler)
+  media = window.matchMedia('(prefers-color-scheme: dark)')
+  mediaChangeHandler = () => themeMode.value === 'system' && applyTheme()
+  media.addEventListener('change', mediaChangeHandler)
+})
+
+onBeforeUnmount(() => {
+  if (media && mediaChangeHandler) {
+    media.removeEventListener('change', mediaChangeHandler)
+  }
 })
 
 watch(themeMode, (val) => {
@@ -243,7 +251,7 @@ body {
   top: 8px;
   z-index: 1000;
 }
-</style>
+
 .app-aside.collapsed {
   pointer-events: none;
 }
@@ -254,3 +262,4 @@ body {
 .fade-enter-from, .fade-leave-to {
   opacity: 0;
 }
+</style>
