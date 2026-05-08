@@ -7,27 +7,45 @@ import zhCn from 'element-plus/es/locale/lang/zh-cn'
 import App from './App.vue'
 import { initializeSystem } from '@/services'
 
-// 导入页面组件
 import SchedulePage from './pages/Schedule.vue'
-// import PeoplePage from './pages/People.vue'
-// import ShiftsPage from './pages/Shifts.vue'
-// import ExtraRestPage from './pages/ExtraRest.vue'
 import DashboardPage from './pages/Dashboard.vue'
+import LoginPage from './pages/Login.vue'
+import { AUTH_STORAGE_KEY, AUTH_EXPIRY_KEY } from './utils/constants'
 
-// 创建路由
+const isAuthenticated = (): boolean => {
+  const token = localStorage.getItem(AUTH_STORAGE_KEY)
+  const expiry = localStorage.getItem(AUTH_EXPIRY_KEY)
+  if (!token || !expiry) return false
+  if (Date.now() > Number(expiry)) {
+    localStorage.removeItem(AUTH_STORAGE_KEY)
+    localStorage.removeItem(AUTH_EXPIRY_KEY)
+    return false
+  }
+  return true
+}
+
 const routes = [
   { path: '/', redirect: '/schedule' },
+  { path: '/login', component: LoginPage, name: '登录', meta: { public: true } },
   { path: '/schedule', component: SchedulePage, name: '排班管理' },
-  // { path: '/people', component: PeoplePage, name: '人员管理' },
-  // { path: '/shifts', component: ShiftsPage, name: '班次管理' },
-  // { path: '/extra-rest', component: ExtraRestPage, name: '额外休息配置' },
   { path: '/dashboard', component: DashboardPage, name: '基础配置' },
-  // { path: '/test', component: () => import('./pages/Test.vue'), name: '功能测试' }
 ]
 
 const router = createRouter({
   history: createWebHashHistory(),
   routes
+})
+
+router.beforeEach((to, _from, next) => {
+  if (to.meta.public) {
+    next()
+    return
+  }
+  if (!isAuthenticated()) {
+    next({ path: '/login', query: { redirect: to.fullPath } })
+  } else {
+    next()
+  }
 })
 
 // 创建应用
