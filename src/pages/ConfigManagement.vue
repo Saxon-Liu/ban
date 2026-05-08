@@ -26,11 +26,19 @@
         <div class="action-item">
           <div class="action-info">
             <h3>导入配置</h3>
-            <p>从JSON文件恢复配置。注意：导入将覆盖具有相同ID的现有配置，并合并新配置。</p>
+            <p>从JSON文件恢复配置。默认仅导入活动人员并按 ID 合并；可按需切换为完全覆盖或包含归档人员。</p>
           </div>
-          <el-button type="warning" @click="handleImport">
-            导入配置
-          </el-button>
+          <div class="action-controls">
+            <el-button type="warning" @click="handleImport">
+              导入配置
+            </el-button>
+            <el-checkbox v-model="importArchivedPeople" class="export-option">
+              包含归档人员
+            </el-checkbox>
+            <el-checkbox v-model="replaceAllBeforeImport" class="export-option">
+              导入前清空现有数据
+            </el-checkbox>
+          </div>
         </div>
 
         <div class="action-item danger">
@@ -60,31 +68,39 @@
 
 <script setup lang="ts">
 import { ref } from "vue";
-import { ElMessage, ElMessageBox } from "element-plus";
+import { ElLoading, ElMessage, ElMessageBox } from "element-plus";
 import { repositories } from "@/repositories";
 import { dbManager } from "@/repositories/IndexedDBManager";
 import { getCurrentDateTime } from "@/utils/common";
 import { initializeDefaultShifts } from "@/services/initialization";
 import { DEFAULT_SHIFTS } from "@/utils";
 import type { Shift, Schedule } from "@/types";
+import type { LoadingInstance } from "element-plus/es/components/loading/src/loading";
 
 const fileInput = ref<HTMLInputElement | null>(null);
 const reinitializing = ref(false);
 const exportSchedules = ref(true);
+const importArchivedPeople = ref(false);
+const replaceAllBeforeImport = ref(false);
+let reinitializeLoading: LoadingInstance | null = null;
 
 const normalizeShifts = (shifts: Shift[] = []) => {
   const defaultRestShift = DEFAULT_SHIFTS.find((shift) => shift.isRest);
   const dedupMap = new Map<string, Shift>();
+  const shiftIdMap = new Map<string, string>();
 
   for (const shift of shifts) {
     const normalized: Shift = { ...shift } as Shift;
     if (shift.isRest) {
       if (defaultRestShift) {
+        shiftIdMap.set(shift.id, defaultRestShift.id);
         normalized.id = defaultRestShift.id;
         normalized.name = shift.name || defaultRestShift.name;
         normalized.color = shift.color || defaultRestShift.color;
       }
       normalized.isRest = true;
+    } else {
+      shiftIdMap.set(shift.id, shift.id);
     }
 
     if (dedupMap.has(normalized.id)) {
@@ -94,7 +110,10 @@ const normalizeShifts = (shifts: Shift[] = []) => {
     }
   }
 
-  return Array.from(dedupMap.values());
+  return {
+    shifts: Array.from(dedupMap.values()),
+    shiftIdMap,
+  };
 };
 
 /**
@@ -103,13 +122,13 @@ const normalizeShifts = (shifts: Shift[] = []) => {
 const handleExport = async () => {
   try {
     const [people, shifts, extraRestConfigs, scheduleData] = await Promise.all([
-      repositories.people.getAll(),
-      repositories.shifts.getAll(),
+      repositories.people.getAllIncludingArchived(),
+      repositories.shifts.getAllIncludingArchived(),
       repositories.extraRestConfigs.getAll(),
       exportSchedules.value ? repositories.schedules.getAll() : Promise.resolve([]),
     ]);
 
-    const normalizedShifts = normalizeShifts(shifts as Shift[]);
+    const { shifts: normalizedShifts } = normalizeShifts(shifts as Shift[]);
     const normalizedSchedules = exportSchedules.value
       ? (scheduleData as Schedule[]).map((schedule) => ({
           ...schedule,
@@ -170,6 +189,11 @@ const handleReinitialize = async () => {
   }
 
   reinitializing.value = true;
+  reinitializeLoading = ElLoading.service({
+    lock: true,
+    text: "正在初始化系统，请稍候...",
+    background: "rgba(255, 255, 255, 0.72)",
+  });
   try {
     await dbManager.deleteDatabase();
     await initializeDefaultShifts();
@@ -179,6 +203,8 @@ const handleReinitialize = async () => {
     console.error("系统初始化失败", error);
     ElMessage.error("初始化失败，请稍后重试");
   } finally {
+    reinitializeLoading?.close();
+    reinitializeLoading = null;
     reinitializing.value = false;
   }
 };
@@ -210,7 +236,13 @@ const handleFileChange = async (event: Event) => {
     }
 
     await ElMessageBox.confirm(
-      "导入将覆盖现有的同ID配置数据，且操作不可撤销。是否继续？",
+      replaceAllBeforeImport.value
+        ? "将先清空当前全部数据，再导入配置。该操作不可撤销，是否继续？"
+        : `将按 ID 合并导入配置${
+            importArchivedPeople.value
+              ? "，并包含本次文件中的归档人员"
+              : "，本次文件中的归档人员及其排班将被跳过，不影响本地已存在的归档数据"
+          }。是否继续？`,
       "确认导入",
       {
         confirmButtonText: "确定",
@@ -219,7 +251,10 @@ const handleFileChange = async (event: Event) => {
       }
     );
 
-    await importData(configData.data);
+    await importData(configData.data, {
+      importArchivedPeople: importArchivedPeople.value,
+      replaceAllBeforeImport: replaceAllBeforeImport.value,
+    });
     ElMessage.success("配置导入成功，请刷新页面查看最新数据");
     
     // 稍微延迟后刷新页面以确保所有状态更新
@@ -249,10 +284,19 @@ const parseTimestamp = (value: any): Date => {
   return getCurrentDateTime();
 };
 
+const getScheduleSlotKey = (personId: string, date: string) =>
+  `${personId}::${date}`;
+
 /**
  * 执行数据导入
  */
-const importData = async (data: any) => {
+const importData = async (
+  data: any,
+  options: {
+    importArchivedPeople: boolean;
+    replaceAllBeforeImport: boolean;
+  }
+) => {
   const { people, shifts, extraRestConfigs, schedules: schedulePayload } = data;
   const now = getCurrentDateTime();
   const db = await dbManager.getDB();
@@ -262,6 +306,20 @@ const importData = async (data: any) => {
     'readwrite'
   );
 
+  if (options.replaceAllBeforeImport) {
+    await Promise.all([
+      transaction.objectStore('schedules').clear(),
+      transaction.objectStore('people').clear(),
+      transaction.objectStore('extraRestConfigs').clear(),
+      transaction.objectStore('shifts').clear(),
+    ]);
+  }
+
+  const importedPersonIds = new Set<string>();
+  const importedShiftIds = new Set<string>();
+  const scheduleStore = transaction.objectStore('schedules');
+  const importedScheduleMap = new Map<string, any>();
+
   // 导入人员
   if (Array.isArray(people)) {
     for (const p of people) {
@@ -270,18 +328,25 @@ const importData = async (data: any) => {
         console.warn('跳过无效人员数据:', p);
         continue;
       }
+
+      const isArchived = Boolean(p.archivedAt);
+      if (isArchived && !options.importArchivedPeople) {
+        continue;
+      }
       
       const item = {
         ...p,
         createdAt: parseTimestamp(p.createdAt),
+        archivedAt: p.archivedAt ? parseTimestamp(p.archivedAt) : null,
         updatedAt: now,
       };
-      transaction.objectStore('people').put(item);
+      await transaction.objectStore('people').put(item);
+      importedPersonIds.add(p.id);
     }
   }
 
   // 导入班次
-  const normalizedShifts = normalizeShifts(shifts as Shift[]);
+  const { shifts: normalizedShifts, shiftIdMap } = normalizeShifts(shifts as Shift[]);
 
   if (Array.isArray(normalizedShifts)) {
     for (const s of normalizedShifts) {
@@ -294,9 +359,11 @@ const importData = async (data: any) => {
       const item = {
         ...s,
         createdAt: parseTimestamp(s.createdAt),
+        archivedAt: s.archivedAt ? parseTimestamp(s.archivedAt) : null,
         updatedAt: now,
       };
-      transaction.objectStore('shifts').put(item);
+      await transaction.objectStore('shifts').put(item);
+      importedShiftIds.add(item.id);
     }
   }
 
@@ -314,7 +381,7 @@ const importData = async (data: any) => {
         createdAt: parseTimestamp(c.createdAt),
         updatedAt: now,
       };
-      transaction.objectStore('extraRestConfigs').put(item);
+      await transaction.objectStore('extraRestConfigs').put(item);
     }
   }
 
@@ -326,13 +393,39 @@ const importData = async (data: any) => {
         continue;
       }
 
+      if (!options.importArchivedPeople && !importedPersonIds.has(schedule.personId)) {
+        continue;
+      }
+
+      const mappedShiftId = shiftIdMap.get(schedule.shiftId) || schedule.shiftId;
+      if (!importedShiftIds.has(mappedShiftId)) {
+        continue;
+      }
+
       const item = {
         ...schedule,
+        shiftId: mappedShiftId,
         createdAt: parseTimestamp(schedule.createdAt),
         updatedAt: parseTimestamp(schedule.updatedAt),
       };
-      transaction.objectStore('schedules').put(item);
+      importedScheduleMap.set(
+        getScheduleSlotKey(item.personId, item.date),
+        item
+      );
     }
+  }
+
+  for (const item of importedScheduleMap.values()) {
+    const existing = await scheduleStore.index('by-personId-date').get([
+      item.personId,
+      item.date,
+    ]);
+
+    if (existing && existing.id !== item.id) {
+      await scheduleStore.delete(existing.id);
+    }
+
+    await scheduleStore.put(item);
   }
 
   // 只需等待事务完成
