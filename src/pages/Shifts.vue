@@ -87,7 +87,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, reactive, watch, nextTick } from "vue";
+import { ref, onMounted, onBeforeUnmount, reactive, watch, nextTick } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { Plus, Edit, Delete, Rank } from "@element-plus/icons-vue";
 import type { Shift } from "@/types";
@@ -100,6 +100,7 @@ const loading = ref(false);
 const showAddDialog = ref(false);
 const editingShift = ref<Shift | null>(null);
 const shiftFormRef = ref();
+let sortableInstance: Sortable | null = null;
 
 // 表单数据
 const shiftForm = reactive({
@@ -133,7 +134,6 @@ const loadShifts = async () => {
       总班次: all.length,
       班次列表: all.map((s) => s.name),
     });
-    // Re-init sortable after data load if necessary
     initSortable();
   } catch (error) {
     console.error("[loadShifts-error]", {
@@ -150,9 +150,11 @@ const loadShifts = async () => {
 
 const initSortable = () => {
   nextTick(() => {
+    sortableInstance?.destroy();
+    sortableInstance = null;
     const table = document.querySelector("#shifts-table .el-table__body-wrapper tbody");
     if (table) {
-      Sortable.create(table as HTMLElement, {
+      sortableInstance = Sortable.create(table as HTMLElement, {
         handle: ".drag-handle",
         animation: 150,
         ghostClass: "sortable-ghost",
@@ -210,8 +212,8 @@ const handleDelete = async (shift: Shift) => {
 
     if (hasSchedules) {
       await ElMessageBox.confirm(
-        `班次 "${shift.name}" 已有排班记录，删除将同时清理所有相关排班数据。是否继续？`,
-        "确认删除",
+        `班次 "${shift.name}" 已有历史排班记录。归档后会保留历史排班，但不再出现在后续排班中。是否继续？`,
+        "确认归档",
         {
           confirmButtonText: "确定",
           cancelButtonText: "取消",
@@ -220,8 +222,8 @@ const handleDelete = async (shift: Shift) => {
       );
     } else {
       await ElMessageBox.confirm(
-        `确定要删除班次 "${shift.name}" 吗？`,
-        "确认删除",
+        `确定要归档班次 "${shift.name}" 吗？归档后该班次将不再出现在后续排班中。`,
+        "确认归档",
         {
           confirmButtonText: "确定",
           cancelButtonText: "取消",
@@ -231,7 +233,7 @@ const handleDelete = async (shift: Shift) => {
     }
 
     await repositories.shifts.delete(shift.id);
-    ElMessage.success("删除成功");
+    ElMessage.success("归档成功");
     await loadShifts();
   } catch (error) {
     if (error !== "cancel") {
@@ -309,6 +311,11 @@ watch(showAddDialog, (newVal) => {
 // 页面加载时初始化数据
 onMounted(() => {
   loadShifts();
+});
+
+onBeforeUnmount(() => {
+  sortableInstance?.destroy();
+  sortableInstance = null;
 });
 </script>
 

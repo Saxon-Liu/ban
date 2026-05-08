@@ -101,7 +101,7 @@
           </el-table-column>
 
           <el-table-column
-            v-for="shift in shifts"
+            v-for="shift in visibleShifts"
             :key="shift.id"
             :label="shift.name"
             min-width="150"
@@ -141,7 +141,7 @@
               >
                 <!-- 整格拖拽手柄 -->
                 <div
-                  v-if="getSchedulePersonIds(row.date, shift.id).length > 0"
+                  v-if="canDragCell(row.date, shift.id)"
                   class="cell-handle"
                   draggable="true"
                   @dragstart.stop="
@@ -177,11 +177,12 @@
                           dragState.personId === personId &&
                           dragState.type === 'schedule',
                       }"
-                      closable
+                      :closable="isScheduleEditable(personId, shift.id)"
                       disable-transitions
                       @close="removeSchedule(personId, row.date, shift.id)"
-                      :draggable="true"
+                      :draggable="isScheduleEditable(personId, shift.id)"
                       @dragstart="
+                        isScheduleEditable(personId, shift.id) &&
                         handleScheduleDragStart(
                           $event,
                           personId,
@@ -203,6 +204,9 @@
                     >
                       <span>
                         {{ getPersonName(personId) }}
+                      </span>
+                      <span v-if="isPersonArchived(personId)" class="archived-badge">
+                        已归档
                       </span>
                     </el-tag>
                   </template>
@@ -250,6 +254,7 @@
                 ></div>
                 <span class="person-name">{{ getPersonName(personId) }}</span>
                 <el-button
+                  v-if="isScheduleEditable(personId, selectedShiftId)"
                   type="danger"
                   size="small"
                   @click="
@@ -289,6 +294,12 @@ import type {
   DragData,
 } from "@/types";
 import { repositories } from "@/repositories";
+import {
+  buildPersonStatistics,
+  getRestShiftId,
+  getScheduleCellKey,
+  scheduleService,
+} from "@/services";
 import {
   getAdaptiveTextColor,
   getMonthDates,
@@ -339,7 +350,7 @@ const peopleWithStats = computed(() => {
   const month = currentMonth.value;
   if (!month) return [];
   // TypeScript 推断问题：month 在此处已确保非 null，但类型系统未能识别
-  return people.value.map((person) => {
+  return activePeople.value.map((person) => {
     const stats = calculatePersonStatistics(person.id, month as string);
     return {
       ...person,
@@ -353,6 +364,57 @@ const monthDates = computed(() => {
   return getMonthDates(currentMonth.value);
 });
 
+const activePeople = computed(() =>
+  people.value.filter((person) => !person.archivedAt)
+);
+
+const personMap = computed(() => {
+  const map = new Map<string, Person>();
+  people.value.forEach((person) => map.set(person.id, person));
+  return map;
+});
+
+const restShiftId = computed(() => getRestShiftId(shifts.value));
+
+const shiftMap = computed(() => {
+  const map = new Map<string, Shift>();
+  shifts.value.forEach((shift) => map.set(shift.id, shift));
+  return map;
+});
+
+const visibleShifts = computed(() => {
+  const usedShiftIds = new Set(schedules.value.map((schedule) => schedule.shiftId));
+  return shifts.value.filter(
+    (shift) => !shift.archivedAt || usedShiftIds.has(shift.id)
+  );
+});
+
+const scheduleCellMap = computed(() => {
+  const map = new Map<string, Schedule[]>();
+  for (const schedule of schedules.value) {
+    const key = getScheduleCellKey(schedule.date, schedule.shiftId);
+    const bucket = map.get(key);
+    if (bucket) {
+      bucket.push(schedule);
+    } else {
+      map.set(key, [schedule]);
+    }
+  }
+
+  for (const bucket of map.values()) {
+    bucket.sort((a, b) => {
+      const ao = a.order ?? 0;
+      const bo = b.order ?? 0;
+      if (ao !== bo) return ao - bo;
+      const at = a.createdAt?.getTime?.() ? a.createdAt.getTime() : 0;
+      const bt = b.createdAt?.getTime?.() ? b.createdAt.getTime() : 0;
+      return at - bt;
+    });
+  }
+
+  return map;
+});
+
 // 方法
 /**
  * 加载数据
@@ -363,8 +425,8 @@ const loadData = async () => {
   loading.value = true;
   try {
     const [peopleData, shiftsData, schedulesData] = await Promise.all([
-      repositories.people.getAll(),
-      repositories.shifts.getAll(),
+      repositories.people.getAllIncludingArchived(),
+      repositories.shifts.getAllIncludingArchived(),
       repositories.schedules.getByMonth(currentMonth.value),
     ]);
 
@@ -400,37 +462,40 @@ const loadData = async () => {
  * 计算人员统计信息
  */
 const calculatePersonStatistics = (personId: string, month: string) => {
-  const person = people.value.find((p) => p.id === personId);
+  const person = personMap.value.get(personId);
   if (!person) return undefined;
-
-  // 这里简化计算，实际应该从Repository获取
-  const restShift = shifts.value.find((s) => (s as any).isRest === true);
-  if (!restShift) return undefined;
-
-  const monthSchedules = schedules.value.filter(
-    (s) =>
-      s.personId === personId && s.month === month && s.shiftId === restShift.id
-  );
-
-  const scheduledRestDays = monthSchedules.length;
-  const totalRestDays =
-    person.baseRestDays + extraRestDaysForCurrentMonth.value;
-  const remainingRestDays = totalRestDays - scheduledRestDays;
-
-  return {
-    personId,
+  return buildPersonStatistics({
+    person,
     month,
-    baseRestDays: person.baseRestDays,
+    schedules: schedules.value,
     extraRestDays: extraRestDaysForCurrentMonth.value,
-    scheduledRestDays,
-    remainingRestDays,
-    isOverRest: remainingRestDays < 0,
-  };
+    restShiftId: restShiftId.value,
+  });
 };
 
 const setMonth = async (month: string) => {
   if (!month || month === currentMonth.value) return;
   emit("update:current-month", month);
+};
+
+const isPersonArchived = (personId: string) =>
+  Boolean(personMap.value.get(personId)?.archivedAt);
+
+const isShiftArchived = (shiftId: string) =>
+  Boolean(shiftMap.value.get(shiftId)?.archivedAt);
+
+const isScheduleEditable = (personId: string, shiftId: string) =>
+  !isPersonArchived(personId) && !isShiftArchived(shiftId);
+
+const canDragCell = (date: string, shiftId: string) => {
+  if (isShiftArchived(shiftId)) {
+    return false;
+  }
+  const personIds = getSchedulePersonIds(date, shiftId);
+  return (
+    personIds.length > 0 &&
+    personIds.every((personId) => isScheduleEditable(personId, shiftId))
+  );
 };
 
 /**
@@ -580,6 +645,11 @@ const handleCellDrop = async (
     const dragDataStr = event.dataTransfer.getData("text/plain");
     const dragData: DragData = JSON.parse(dragDataStr);
     const targetIndex = dragState.value.targetIndex ?? -1;
+    if (isShiftArchived(shiftId)) {
+      ElMessage.warning("该班次已归档，仅保留历史排班，不可继续排班");
+      handleDragEnd();
+      return;
+    }
 
     if (
       dragData.type === "schedule" &&
@@ -614,7 +684,11 @@ const handleCellDrop = async (
           s.shiftId === dragData.sourceShiftId
       );
       if (sourceSchedule) {
-        await repositories.schedules.delete(sourceSchedule.id);
+        await scheduleService.removeScheduleByIdentity(
+          dragData.personId,
+          dragData.sourceDate,
+          dragData.sourceShiftId
+        );
         schedules.value = schedules.value.filter(
           (s) => s.id !== sourceSchedule.id
         );
@@ -646,89 +720,28 @@ const handleCellDrop = async (
       // 判断是复制还是移动 (Ctrl键)
       const isCopy = event.ctrlKey || event.metaKey;
 
-      let conflictCount = 0;
-      const newSchedulesToCreate: any[] = [];
+      const result = await scheduleService.transferCellSchedules({
+        sourceDate,
+        sourceShiftId,
+        targetDate: date,
+        targetShiftId: shiftId,
+        month: currentMonth.value!,
+        schedules: schedules.value,
+        mode: isCopy ? "copy" : "move",
+      });
 
-      // 获取目标单元格现有的最大order
-      const existingTargetSchedules = schedules.value.filter(
-        (s) => s.date === date && s.shiftId === shiftId
-      );
-      let maxOrder = existingTargetSchedules.reduce(
-        (max, s) => Math.max(max, s.order || 0),
-        0
-      );
-
-      for (const sourceItem of sourceSchedules) {
-        // 检查目标日期冲突
-        if (sourceItem.date !== date) {
-          const conflictSchedule = schedules.value.find(
-            (s) => s.personId === sourceItem.personId && s.date === date
-          );
-          if (conflictSchedule) {
-            conflictCount++;
-            continue;
-          }
-        }
-
-        // 检查目标单元格是否已存在该人
-        const alreadyInCell = schedules.value.find(
-          (s) =>
-            s.personId === sourceItem.personId &&
-            s.date === date &&
-            s.shiftId === shiftId
-        );
-        if (alreadyInCell) {
-          continue;
-        }
-
-        maxOrder++;
-        newSchedulesToCreate.push({
-          personId: sourceItem.personId,
-          shiftId: shiftId,
-          date: date,
-          month: currentMonth.value!,
-          order: maxOrder,
-          sourceId: sourceItem.id, // 暂存源ID用于移动时的删除
-        });
-      }
-
-      if (newSchedulesToCreate.length === 0) {
-        if (conflictCount > 0) {
+      if (result.createdCount === 0) {
+        if (result.conflictCount > 0) {
           ElMessage.warning(`操作失败：所有人员在目标日期已有排班`);
         }
         handleDragEnd();
         return;
       }
 
-      // 如果是移动，删除源记录
-      if (!isCopy) {
-        const movedPersonIds = newSchedulesToCreate.map((n) => n.personId);
-        const schedulesToDelete = sourceSchedules.filter((s) =>
-          movedPersonIds.includes(s.personId)
-        );
-
-        // 乐观更新
-        schedules.value = schedules.value.filter(
-          (s) => !schedulesToDelete.find((del) => del.id === s.id)
-        );
-
-        // 后台删除
-        for (const s of schedulesToDelete) {
-          await repositories.schedules.delete(s.id);
-        }
-      }
-
-      // 创建新记录
-      for (const newItem of newSchedulesToCreate) {
-        // 删除临时字段 sourceId
-        const { sourceId, ...dataToCreate } = newItem;
-        await repositories.schedules.create(dataToCreate);
-      }
-
       const actionName = isCopy ? "复制" : "移动";
-      let msg = `${actionName}成功 ${newSchedulesToCreate.length} 人`;
-      if (conflictCount > 0) {
-        msg += `，${conflictCount} 人因冲突跳过`;
+      let msg = `${actionName}成功 ${result.createdCount} 人`;
+      if (result.conflictCount > 0) {
+        msg += `，${result.conflictCount} 人因冲突跳过`;
       }
       ElMessage.success(msg);
 
@@ -778,52 +791,20 @@ const handleCellDrop = async (
       }
     }
 
-    const existingCell = schedules.value
-      .filter((s) => s.date === date && s.shiftId === shiftId)
-      .sort((a, b) => (a.order ?? 0) - (b.order ?? 0));
-
     if (targetIndex >= 0) {
-      const newSchedules = [...existingCell];
-      const newScheduleData = {
+      await scheduleService.insertScheduleIntoCell({
         personId: dragData.personId,
         shiftId,
         date,
         month: currentMonth.value!,
-        order: 0,
-      };
-
-      newSchedules.splice(targetIndex, 0, newScheduleData as any);
-      const updates = newSchedules.map((s, idx) => ({
-        id: s.id,
-        data: { order: idx + 1 },
-      }));
-
-      await repositories.schedules.create({
-        ...newScheduleData,
-        order: targetIndex + 1,
+        targetIndex,
       });
-
-      const updatesToRun = updates.filter((u) => u.id);
-      if (updatesToRun.length > 0) {
-        if ((repositories as any)?.schedules?.batchUpdate) {
-          await (repositories.schedules as any).batchUpdate(updatesToRun);
-        } else {
-          for (const u of updatesToRun) {
-            await repositories.schedules.update(u.id, u.data);
-          }
-        }
-      }
     } else {
-      const maxOrder = existingCell.reduce(
-        (m, s) => Math.max(m, s.order ?? 0),
-        0
-      );
-      await repositories.schedules.create({
+      await scheduleService.appendScheduleToCell({
         personId: dragData.personId,
         shiftId,
         date,
         month: currentMonth.value!,
-        order: maxOrder + 1,
       });
     }
 
@@ -846,40 +827,15 @@ const handleTagReorder = async (
   shiftId: string,
   targetIndex: number
 ) => {
-  const cellList = schedules.value
-    .filter((s) => s.date === date && s.shiftId === shiftId)
-    .sort((a, b) => {
-      const ao = a.order ?? 0;
-      const bo = b.order ?? 0;
-      if (ao !== bo) return ao - bo;
-      const at = a.createdAt?.getTime?.() ? a.createdAt.getTime() : 0;
-      const bt = b.createdAt?.getTime?.() ? b.createdAt.getTime() : 0;
-      return at - bt;
-    });
+  const changed = await scheduleService.reorderSchedulesInCell({
+    personId,
+    date,
+    shiftId,
+    targetIndex,
+    schedules: schedules.value,
+  });
 
-  const fromIndex = cellList.findIndex((s) => s.personId === personId);
-  if (fromIndex < 0 || targetIndex < 0) return;
-
-  const list = [...cellList];
-  const [moved] = list.splice(fromIndex, 1);
-
-  // 修正插入位置
-  let finalIndex = targetIndex;
-
-  list.splice(finalIndex, 0, moved);
-
-  const updates = list.map((s, idx) => ({
-    id: s.id,
-    data: { order: idx + 1 },
-  }));
-
-  if ((repositories as any)?.schedules?.batchUpdate) {
-    await (repositories.schedules as any).batchUpdate(updates);
-  } else {
-    for (const u of updates) {
-      await repositories.schedules.update(u.id, u.data);
-    }
-  }
+  if (!changed) return;
 
   ElMessage.success("已更新排序");
   await loadData();
@@ -959,24 +915,16 @@ const handleCellClick = (date: string, shiftId: string) => {
  * 获取指定日期和班次的排班人员ID列表
  */
 const getSchedulePersonIds = (date: string, shiftId: string) => {
-  return schedules.value
-    .filter((s) => s.date === date && s.shiftId === shiftId)
-    .sort((a, b) => {
-      const ao = a.order ?? 0;
-      const bo = b.order ?? 0;
-      if (ao !== bo) return ao - bo;
-      const at = a.createdAt?.getTime?.() ? a.createdAt.getTime() : 0;
-      const bt = b.createdAt?.getTime?.() ? b.createdAt.getTime() : 0;
-      return at - bt;
-    })
-    .map((s) => s.personId);
+  return (
+    scheduleCellMap.value.get(getScheduleCellKey(date, shiftId)) || []
+  ).map((schedule) => schedule.personId);
 };
 
 /**
  * 获取人员颜色
  */
 const getPersonColor = (personId: string) => {
-  const person = people.value.find((p) => p.id === personId);
+  const person = personMap.value.get(personId);
   return person?.color || "#ccc";
 };
 
@@ -984,7 +932,7 @@ const getPersonColor = (personId: string) => {
  * 获取人员姓名
  */
 const getPersonName = (personId: string) => {
-  const person = people.value.find((p) => p.id === personId);
+  const person = personMap.value.get(personId);
   return person?.name || "未知";
 };
 
@@ -993,7 +941,7 @@ const getPersonName = (personId: string) => {
  * 获取班次名称
  */
 const getShiftName = (shiftId: string) => {
-  const shift = shifts.value.find((s) => s.id === shiftId);
+  const shift = shiftMap.value.get(shiftId);
   return shift?.name || "未知班次";
 };
 
@@ -1006,12 +954,12 @@ const removeSchedule = async (
   shiftId: string
 ) => {
   try {
-    const schedule = schedules.value.find(
-      (s) => s.personId === personId && s.date === date && s.shiftId === shiftId
+    const removed = await scheduleService.removeScheduleByIdentity(
+      personId,
+      date,
+      shiftId
     );
-
-    if (schedule) {
-      await repositories.schedules.delete(schedule.id);
+    if (removed) {
       ElMessage.success("删除排班成功");
       await loadData();
     }
@@ -1144,6 +1092,10 @@ defineExpose({
       .el-tag__close {
         color: inherit;
       }
+    }
+
+    :deep(.schedule-tag[draggable="false"]) {
+      cursor: default;
     }
   }
 
@@ -1292,6 +1244,12 @@ defineExpose({
     text-align: center;
     color: var(--el-text-color-secondary);
     padding: 20px;
+  }
+
+  .archived-badge {
+    margin-left: 6px;
+    font-size: 10px;
+    opacity: 0.85;
   }
 
   :deep(.el-table) {

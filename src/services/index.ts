@@ -5,3 +5,10 @@
 
 export { initializeDefaultShifts, initializeSystem } from './initialization'
 export { ExcelExportService, excelExportService } from './excelExport'
+export { ScheduleService, scheduleService } from './scheduleService'
+export {
+  buildPersonStatistics,
+  getRestShiftId,
+  getScheduleCellKey,
+  getViewedScheduleMonth,
+} from './scheduleStatistics'

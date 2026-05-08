@@ -4,26 +4,42 @@
  */
 
 import type { PeopleRepository } from './PeopleRepository'
-import type { Person, PersonStatistics, PersonWithStatistics, CreateData, UpdateData } from '@/types'
+import type { Person, PersonStatistics, PersonWithStatistics, CreateData, UpdateData, Shift } from '@/types'
 import { dbManager } from './IndexedDBManager'
-import { generateId, getCurrentDateTime } from '@/utils/common'
+import { generateId, getCurrentDateTime, getDateString } from '@/utils/common'
 import { DEFAULT_COLORS } from '@/utils/constants'
+import { buildPersonStatistics, getRestShiftId } from '@/services/scheduleStatistics'
 
 /**
  * 人员Repository的IndexedDB实现类
  */
 export class IndexedDBPeopleRepository implements PeopleRepository {
+  private sortPeople(list: Person[]): Person[] {
+    return [...list].sort((a: any, b: any) => {
+      const ao = typeof a.order === 'number' ? a.order : Number(new Date(a.createdAt))
+      const bo = typeof b.order === 'number' ? b.order : Number(new Date(b.createdAt))
+      return ao - bo
+    })
+  }
+
   /**
    * 获取所有人员
    */
   async getAll(): Promise<Person[]> {
     const db = await dbManager.getDB()
     const list = await db.getAll('people')
-    return [...list].sort((a: any, b: any) => {
-      const ao = typeof a.order === 'number' ? a.order : Number(new Date(a.createdAt))
-      const bo = typeof b.order === 'number' ? b.order : Number(new Date(b.createdAt))
-      return ao - bo
-    })
+    return this.sortPeople(
+      list.filter((person: Person) => !person.archivedAt)
+    )
+  }
+
+  /**
+   * 获取所有人员，包含已归档人员
+   */
+  async getAllIncludingArchived(): Promise<Person[]> {
+    const db = await dbManager.getDB()
+    const list = await db.getAll('people')
+    return this.sortPeople(list as Person[])
   }
 
   /**
@@ -41,13 +57,14 @@ export class IndexedDBPeopleRepository implements PeopleRepository {
   async create(data: CreateData<Person>): Promise<Person> {
     const db = await dbManager.getDB()
     const now = getCurrentDateTime()
-    const existing = await db.getAll('people')
+    const existing = await this.getAllIncludingArchived()
     const maxOrder = existing
       .map((p: any) => (typeof p.order === 'number' ? p.order : 0))
       .reduce((m: number, v: number) => (v > m ? v : m), 0)
     const person: Person = {
       id: generateId(),
       ...data,
+      archivedAt: null,
       order: maxOrder + 1,
       createdAt: now,
       updatedAt: now,
@@ -82,15 +99,27 @@ export class IndexedDBPeopleRepository implements PeopleRepository {
    */
   async delete(id: string): Promise<boolean> {
     const db = await dbManager.getDB()
-    
-    // 检查是否存在排班记录
-    const hasSchedules = await this.hasScheduleRecords(id)
-    if (hasSchedules) {
-      // 删除相关排班记录
-      await db.delete('schedules', IDBKeyRange.bound([id, ''], [id, '\uffff']))
+    const person = await this.getById(id)
+    if (!person) {
+      throw new Error(`人员不存在: ${id}`)
     }
-    
-    await db.delete('people', id)
+
+    if (person.archivedAt) {
+      return true
+    }
+
+    const today = getDateString()
+    const schedules = await db.getAllFromIndex('schedules', 'by-personId', id)
+    const futureSchedules = schedules.filter((schedule) => schedule.date >= today)
+    if (futureSchedules.length > 0) {
+      const tx = db.transaction('schedules', 'readwrite')
+      await Promise.all(futureSchedules.map((schedule) => tx.store.delete(schedule.id)))
+      await tx.done
+    }
+
+    await this.update(id, {
+      archivedAt: getCurrentDateTime(),
+    })
     return true
   }
 
@@ -110,30 +139,16 @@ export class IndexedDBPeopleRepository implements PeopleRepository {
     const extraRestConfig = await db.getFromIndex('extraRestConfigs', 'by-year-month', [year, monthNum])
     const extraRestDays = extraRestConfig?.extraRestDays || 0
     
-    // 获取当月的休息班次排班记录
     const shifts = await db.getAll('shifts')
-    const restShift = shifts.find(s => (s as any).isRest === true)
-    let scheduledRestDays = 0
-    
-    if (restShift) {
-      const schedules = await db.getAllFromIndex('schedules', 'by-personId', personId)
-      const monthSchedules = schedules.filter(s => s.month === month && s.shiftId === restShift.id)
-      scheduledRestDays = monthSchedules.length
-    }
-    
-    const baseRestDays = person.baseRestDays
-    const totalRestDays = baseRestDays + extraRestDays
-    const remainingRestDays = totalRestDays - scheduledRestDays
-    
-    return {
-      personId,
+    const schedules = await db.getAllFromIndex('schedules', 'by-personId', personId)
+
+    return buildPersonStatistics({
+      person,
       month,
-      baseRestDays,
+      schedules,
       extraRestDays,
-      scheduledRestDays,
-      remainingRestDays,
-      isOverRest: remainingRestDays < 0,
-    }
+      restShiftId: getRestShiftId(shifts as Shift[]),
+    })
   }
 
   /**
@@ -141,17 +156,26 @@ export class IndexedDBPeopleRepository implements PeopleRepository {
    */
   async getAllWithStatistics(month: string): Promise<PersonWithStatistics[]> {
     const people = await this.getAll()
-    const peopleWithStats: PersonWithStatistics[] = []
-    
-    for (const person of people) {
-      const statistics = await this.getPersonStatistics(person.id, month)
-      peopleWithStats.push({
-        ...person,
-        statistics,
-      })
-    }
-    
-    return peopleWithStats
+    const db = await dbManager.getDB()
+    const [year, monthNum] = month.split('-').map(Number)
+    const [shifts, allSchedules, extraRestConfig] = await Promise.all([
+      db.getAll('shifts'),
+      db.getAllFromIndex('schedules', 'by-month', month),
+      db.getFromIndex('extraRestConfigs', 'by-year-month', [year, monthNum]),
+    ])
+    const restShiftId = getRestShiftId(shifts as Shift[])
+    const extraRestDays = extraRestConfig?.extraRestDays || 0
+
+    return people.map((person) => ({
+      ...person,
+      statistics: buildPersonStatistics({
+        person,
+        month,
+        schedules: allSchedules,
+        extraRestDays,
+        restShiftId,
+      }),
+    }))
   }
 
   /**
@@ -187,9 +211,17 @@ export class IndexedDBPeopleRepository implements PeopleRepository {
   async batchCreate(items: CreateData<Person>[]): Promise<Person[]> {
     const db = await dbManager.getDB()
     const now = getCurrentDateTime()
+    const existing = await this.getAllIncludingArchived()
+    let nextOrder =
+      existing
+        .map((p: any) => (typeof p.order === 'number' ? p.order : 0))
+        .reduce((m: number, v: number) => (v > m ? v : m), 0) + 1
+
     const people: Person[] = items.map(item => ({
       id: generateId(),
       ...item,
+      archivedAt: null,
+      order: nextOrder++,
       createdAt: now,
       updatedAt: now,
     }))
@@ -231,20 +263,32 @@ export class IndexedDBPeopleRepository implements PeopleRepository {
    * 批量删除人员
    */
   async batchDelete(ids: string[]): Promise<boolean> {
+    const now = getCurrentDateTime()
+    const people = await Promise.all(ids.map((id) => this.getById(id)))
     const db = await dbManager.getDB()
-    
-    // 检查并删除相关排班记录
-    for (const id of ids) {
-      const hasSchedules = await this.hasScheduleRecords(id)
-      if (hasSchedules) {
-        await db.delete('schedules', IDBKeyRange.bound([id, ''], [id, '\uffff']))
-      }
+    const today = getDateString()
+    const scheduleTx = db.transaction('schedules', 'readwrite')
+
+    for (const person of people) {
+      if (!person) continue
+      const schedules = await db.getAllFromIndex('schedules', 'by-personId', person.id)
+      const futureSchedules = schedules.filter((schedule) => schedule.date >= today)
+      await Promise.all(futureSchedules.map((schedule) => scheduleTx.store.delete(schedule.id)))
     }
-    
+    await scheduleTx.done
+
     const tx = db.transaction('people', 'readwrite')
-    await Promise.all(ids.map(id => tx.store.delete(id)))
+
+    for (const person of people) {
+      if (!person || person.archivedAt) continue
+      await tx.store.put({
+        ...person,
+        archivedAt: now,
+        updatedAt: now,
+      })
+    }
+
     await tx.done
-    
     return true
   }
 }

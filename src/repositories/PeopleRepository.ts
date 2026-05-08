@@ -12,6 +12,11 @@ import type { Person, PersonStatistics, PersonWithStatistics } from '@/types'
  */
 export interface PeopleRepository extends BaseRepository<Person> {
   /**
+   * 获取所有人员，包含已归档人员
+   */
+  getAllIncludingArchived(): Promise<Person[]>
+
+  /**
    * 获取人员的统计信息
    * @param personId - 人员ID
    * @param month - 月份（YYYY-MM格式）
