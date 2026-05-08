@@ -15,6 +15,13 @@ export {
   getAdaptiveTextColor,
 } from './common'
 
+export {
+  clearAuthSession,
+  isAuthSessionValid,
+  refreshAuthSessionExpiry,
+  startAuthSession,
+} from './auth'
+
 // 日期工具函数
 export { 
   getMonthDates, 

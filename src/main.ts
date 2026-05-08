@@ -10,19 +10,7 @@ import { initializeSystem } from '@/services'
 import SchedulePage from './pages/Schedule.vue'
 import DashboardPage from './pages/Dashboard.vue'
 import LoginPage from './pages/Login.vue'
-import { AUTH_STORAGE_KEY, AUTH_EXPIRY_KEY } from './utils/constants'
-
-const isAuthenticated = (): boolean => {
-  const token = localStorage.getItem(AUTH_STORAGE_KEY)
-  const expiry = localStorage.getItem(AUTH_EXPIRY_KEY)
-  if (!token || !expiry) return false
-  if (Date.now() > Number(expiry)) {
-    localStorage.removeItem(AUTH_STORAGE_KEY)
-    localStorage.removeItem(AUTH_EXPIRY_KEY)
-    return false
-  }
-  return true
-}
+import { isAuthSessionValid, refreshAuthSessionExpiry } from './utils'
 
 const routes = [
   { path: '/', redirect: '/schedule' },
@@ -41,9 +29,10 @@ router.beforeEach((to, _from, next) => {
     next()
     return
   }
-  if (!isAuthenticated()) {
+  if (!isAuthSessionValid()) {
     next({ path: '/login', query: { redirect: to.fullPath } })
   } else {
+    refreshAuthSessionExpiry()
     next()
   }
 })

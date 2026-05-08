@@ -102,7 +102,8 @@ import { ref, reactive } from 'vue'
 import { Lock } from '@element-plus/icons-vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
-import { AUTH_STORAGE_KEY, AUTH_EXPIRY_KEY, AUTH_EXPIRY_HOURS, DEFAULT_KEY, CUSTOM_KEY_STORAGE, RESET_CODE } from '@/utils/constants'
+import { DEFAULT_KEY, CUSTOM_KEY_STORAGE, RESET_CODE } from '@/utils/constants'
+import { startAuthSession } from '@/utils'
 
 const router = useRouter()
 const route = useRoute()
@@ -175,30 +176,32 @@ const rules: FormRules = {
 }
 
 const handleLogin = async () => {
-  if (!formRef.value) return
+  if (!formRef.value || loading.value) return
 
-  await formRef.value.validate((valid) => {
-    if (!valid) return
+  loading.value = true
 
-    loading.value = true
+  try {
+    await formRef.value.validate()
+  } catch {
+    loading.value = false
+    return
+  }
 
-    setTimeout(() => {
-      if (form.secretKey === getCorrectKey()) {
-        const expiryTime = Date.now() + AUTH_EXPIRY_HOURS * 60 * 60 * 1000
-        localStorage.setItem(AUTH_STORAGE_KEY, createAuthToken())
-        localStorage.setItem(AUTH_EXPIRY_KEY, String(expiryTime))
+  try {
+    if (form.secretKey !== getCorrectKey()) {
+      ElMessage.error('密钥错误，请重试')
+      form.secretKey = ''
+      return
+    }
 
-        ElMessage.success('登录成功')
+    startAuthSession(createAuthToken())
+    ElMessage.success('登录成功')
 
-        const redirect = (route.query.redirect as string) || '/schedule'
-        router.push(redirect)
-      } else {
-        ElMessage.error('密钥错误，请重试')
-        form.secretKey = ''
-      }
-      loading.value = false
-    }, 300)
-  })
+    const redirect = (route.query.redirect as string) || '/schedule'
+    await router.push(redirect)
+  } finally {
+    loading.value = false
+  }
 }
 </script>
 

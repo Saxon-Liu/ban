@@ -111,24 +111,32 @@ export const WEEKDAY_NAMES = [
   '周六',
 ] as const
 
-/**
- * 登录认证相关常量
- */
+/** 当前登录态 token 的存储键 */
 export const AUTH_STORAGE_KEY = 'auth-token'
+/** 登录绝对过期时间戳的存储键 */
 export const AUTH_EXPIRY_KEY = 'auth-expiry'
+/** 自定义登录密码的存储键 */
 export const CUSTOM_KEY_STORAGE = 'custom-secret-key'
-export const AUTH_EXPIRY_HOURS = 24
-export const AUTO_LOGOUT_WARNING_MINUTES = 2
-export const AUTO_LOGOUT_TOTAL_MINUTES = 5
+/** 登录后的最长有效时长，属于绝对过期兜底 */
+export const AUTH_EXPIRY_HOURS = 1
+/** 默认无操作提醒时间 */
+export const AUTO_LOGOUT_WARNING_MINUTES = 5
+/** 默认无操作自动退出时间 */
+export const AUTO_LOGOUT_TOTAL_MINUTES = 10
+/** 是否启用自动退出配置的存储键 */
 export const AUTO_LOGOUT_ENABLED_KEY = 'auto-logout-enabled'
+/** 提醒时间配置的存储键 */
 export const AUTO_LOGOUT_WARNING_KEY = 'auto-logout-warning'
+/** 总超时时间配置的存储键 */
 export const AUTO_LOGOUT_TOTAL_KEY = 'auto-logout-total'
 
 /**
  * 安全配置（在此集中修改默认密码和恢复码）
  */
 export const SECURITY_CONFIG = {
+  /** 默认登录密码 */
   DEFAULT_KEY: '0519',
+  /** 恢复码 */
   RESET_CODE: '519519',
 }
 
