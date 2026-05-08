@@ -140,20 +140,27 @@
                 @click="handleCellClick(row.date, shift.id)"
               >
                 <!-- 整格拖拽手柄 -->
-                <div
+                <el-tooltip
                   v-if="canDragCell(row.date, shift.id)"
-                  class="cell-handle"
-                  draggable="true"
-                  @dragstart.stop="
-                    handleCellHandleDragStart($event, row.date, shift.id)
-                  "
-                  @click.stop
-                  title="拖拽移动，按住Ctrl拖拽复制"
+                  content="拖拽移动，按住Ctrl拖拽复制"
+                  placement="top"
+                  :show-after="200"
+                  effect="light"
+                  popper-class="schedule-handle-tooltip"
                 >
-                  <el-icon>
-                    <Rank />
-                  </el-icon>
-                </div>
+                  <div
+                    class="cell-handle"
+                    draggable="true"
+                    @dragstart.stop="
+                      handleCellHandleDragStart($event, row.date, shift.id)
+                    "
+                    @click.stop
+                  >
+                    <el-icon>
+                      <Rank />
+                    </el-icon>
+                  </div>
+                </el-tooltip>
                 <el-space wrap>
                   <template
                     v-for="(personId, index) in getSchedulePersonIds(
@@ -1235,5 +1242,17 @@ defineExpose({
       position: relative;
     }
   }
+}
+
+:deep(.schedule-handle-tooltip.el-popper) {
+  background: var(--el-bg-color-overlay);
+  color: var(--el-text-color-primary);
+  border: 1px solid var(--el-border-color-light);
+  box-shadow: var(--el-box-shadow-light);
+}
+
+:deep(.schedule-handle-tooltip.el-popper .el-popper__arrow::before) {
+  background: var(--el-bg-color-overlay);
+  border-color: var(--el-border-color-light);
 }
 </style>
