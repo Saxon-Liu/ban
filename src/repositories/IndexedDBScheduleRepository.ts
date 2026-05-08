@@ -96,8 +96,7 @@ export class IndexedDBScheduleRepository implements ScheduleRepository {
    */
   async getByPersonAndMonth(personId: string, month: string): Promise<Schedule[]> {
     const db = await dbManager.getDB()
-    const personSchedules = await db.getAllFromIndex('schedules', 'by-personId', personId)
-    return personSchedules.filter(schedule => schedule.month === month)
+    return db.getAllFromIndex('schedules', 'by-personId-month', [personId, month])
   }
 
   /**
@@ -184,24 +183,33 @@ export class IndexedDBScheduleRepository implements ScheduleRepository {
    */
   async batchUpdate(updates: { id: string; data: UpdateData<Schedule> }[]): Promise<Schedule[]> {
     const db = await dbManager.getDB()
+    const tx = db.transaction('schedules', 'readwrite')
+    const store = tx.store
     const updatedSchedules: Schedule[] = []
-    
-    for (const { id, data } of updates) {
-      const schedule = await this.getById(id)
+
+    const existingSchedules = await Promise.all(
+      updates.map(({ id }) => store.get(id))
+    )
+    const now = getCurrentDateTime()
+
+    for (let index = 0; index < updates.length; index++) {
+      const { id, data } = updates[index]
+      const schedule = existingSchedules[index]
       if (!schedule) {
         throw new Error(`排班记录不存在: ${id}`)
       }
-      
+
       const updatedSchedule: Schedule = {
         ...schedule,
         ...data,
-        updatedAt: getCurrentDateTime(),
+        updatedAt: now,
       }
-      
-      await db.put('schedules', updatedSchedule)
+
+      await store.put(updatedSchedule)
       updatedSchedules.push(updatedSchedule)
     }
-    
+
+    await tx.done
     return updatedSchedules
   }
 

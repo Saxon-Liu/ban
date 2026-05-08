@@ -15,7 +15,7 @@ const DB_CONFIG = {
   /** 数据库名称 */
   NAME: "ScheduleManagementDB",
   /** 数据库版本 */
-  VERSION: 2,
+  VERSION: 3,
 } as const;
 
 /**
@@ -42,7 +42,7 @@ export class IndexedDBManager {
    */
   private async connect(): Promise<IDBPDatabase> {
     return openDB(DB_CONFIG.NAME, DB_CONFIG.VERSION, {
-      upgrade(db, oldVersion) {
+      upgrade(db, oldVersion, _newVersion, transaction) {
         // 版本2：推倒重来，删除旧对象存储
         if (oldVersion < 2) {
           const STORE_NAMES = [
@@ -82,9 +82,15 @@ export class IndexedDBManager {
           schedulesStore.createIndex("by-shiftId", "shiftId");
           schedulesStore.createIndex("by-date", "date");
           schedulesStore.createIndex("by-month", "month");
+          schedulesStore.createIndex("by-personId-month", ["personId", "month"]);
           schedulesStore.createIndex("by-personId-date", ["personId", "date"], {
             unique: true,
           });
+        } else if (oldVersion < 3) {
+          const schedulesStore = transaction.objectStore("schedules");
+          if (!schedulesStore.indexNames.contains("by-personId-month")) {
+            schedulesStore.createIndex("by-personId-month", ["personId", "month"]);
+          }
         }
 
         // 额外休息配置表

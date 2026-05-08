@@ -8,6 +8,7 @@ export {
   generateId,
   getCurrentDateTime,
   formatDate,
+  sortByOrder,
   deepClone,
   debounce,
   throttle,
@@ -41,5 +42,7 @@ export {
   AUTH_STORAGE_KEY,
   AUTH_EXPIRY_KEY,
   AUTH_EXPIRY_HOURS,
+  AUTO_LOGOUT_WARNING_MINUTES,
+  AUTO_LOGOUT_TOTAL_MINUTES,
   RESET_CODE,
 } from './constants'
