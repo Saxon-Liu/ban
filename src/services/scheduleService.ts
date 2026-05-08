@@ -38,6 +38,8 @@ interface TransferCellSchedulesParams {
 export interface TransferCellSchedulesResult {
   createdCount: number
   conflictCount: number
+  createdSchedules: Schedule[]
+  deletedIds: string[]
 }
 
 function getSchedulesForCell(schedules: Schedule[], date: string, shiftId: string): Schedule[] {
@@ -61,7 +63,9 @@ async function assertActiveSchedulingEntities(personId: string, shiftId?: string
 }
 
 export class ScheduleService {
-  async assignShiftToPerson(params: AssignShiftParams): Promise<'created' | 'updated' | 'same-shift'> {
+  async assignShiftToPerson(
+    params: AssignShiftParams
+  ): Promise<{ outcome: 'created' | 'updated' | 'same-shift'; schedule?: Schedule }> {
     const { personId, shiftId, date } = params
     await assertActiveSchedulingEntities(personId, shiftId)
     const existing = await repositories.schedules.getByPersonAndDate(personId, date)
@@ -69,23 +73,23 @@ export class ScheduleService {
     if (existing) {
       await assertActiveSchedulingEntities(personId, existing.shiftId)
       if (existing.shiftId === shiftId) {
-        return 'same-shift'
+        return { outcome: 'same-shift', schedule: existing }
       }
-      await repositories.schedules.update(existing.id, { shiftId })
-      return 'updated'
+      const updated = await repositories.schedules.update(existing.id, { shiftId })
+      return { outcome: 'updated', schedule: updated }
     }
 
-    await repositories.schedules.create({
+    const created = await repositories.schedules.create({
       personId,
       shiftId,
       date,
       month: date.slice(0, 7),
       order: 1,
     })
-    return 'created'
+    return { outcome: 'created', schedule: created }
   }
 
-  async removeScheduleByIdentity(personId: string, date: string, shiftId: string): Promise<boolean> {
+  async removeScheduleByIdentity(personId: string, date: string, shiftId: string): Promise<Schedule | null> {
     await assertActiveSchedulingEntities(personId, shiftId)
     const schedules = await repositories.schedules.getByDate(date)
     const target = schedules.find(
@@ -96,11 +100,11 @@ export class ScheduleService {
     )
 
     if (!target) {
-      return false
+      return null
     }
 
     await repositories.schedules.delete(target.id)
-    return true
+    return target
   }
 
   async clearMonthSchedules(month: string): Promise<number> {
@@ -115,7 +119,7 @@ export class ScheduleService {
     return schedules.length
   }
 
-  async appendScheduleToCell(params: AppendScheduleParams): Promise<void> {
+  async appendScheduleToCell(params: AppendScheduleParams): Promise<Schedule> {
     const { personId, shiftId, date, month } = params
     await assertActiveSchedulingEntities(personId, shiftId)
     const existingCell = await repositories.schedules.getByDate(date)
@@ -123,7 +127,7 @@ export class ScheduleService {
       .filter((schedule) => schedule.shiftId === shiftId)
       .reduce((max, schedule) => Math.max(max, schedule.order ?? 0), 0)
 
-    await repositories.schedules.create({
+    return repositories.schedules.create({
       personId,
       shiftId,
       date,
@@ -132,7 +136,9 @@ export class ScheduleService {
     })
   }
 
-  async insertScheduleIntoCell(params: InsertScheduleParams): Promise<void> {
+  async insertScheduleIntoCell(
+    params: InsertScheduleParams
+  ): Promise<{ created: Schedule; updated: Schedule[] }> {
     const { personId, shiftId, date, month, targetIndex } = params
     await assertActiveSchedulingEntities(personId, shiftId)
     const existingCell = getSchedulesForCell(await repositories.schedules.getByDate(date), date, shiftId)
@@ -148,7 +154,7 @@ export class ScheduleService {
       updatedAt: new Date(),
     })
 
-    await repositories.schedules.create({
+    const created = await repositories.schedules.create({
       personId,
       shiftId,
       date,
@@ -163,24 +169,28 @@ export class ScheduleService {
       }))
       .filter((item) => item.id)
 
-    if (updates.length === 0) return
+    if (updates.length === 0) {
+      return { created, updated: [] }
+    }
 
     if (repositories.schedules.batchUpdate) {
-      await repositories.schedules.batchUpdate(updates)
-      return
+      const updated = await repositories.schedules.batchUpdate(updates)
+      return { created, updated }
     }
 
+    const updated: Schedule[] = []
     for (const update of updates) {
-      await repositories.schedules.update(update.id, update.data)
+      updated.push(await repositories.schedules.update(update.id, update.data))
     }
+    return { created, updated }
   }
 
-  async reorderSchedulesInCell(params: ReorderCellSchedulesParams): Promise<boolean> {
+  async reorderSchedulesInCell(params: ReorderCellSchedulesParams): Promise<Schedule[] | null> {
     const { personId, date, shiftId, targetIndex, schedules } = params
     const cellList = getSchedulesForCell(schedules, date, shiftId)
     const fromIndex = cellList.findIndex((schedule) => schedule.personId === personId)
     if (fromIndex < 0 || targetIndex < 0) {
-      return false
+      return null
     }
 
     const reordered = [...cellList]
@@ -193,15 +203,15 @@ export class ScheduleService {
     }))
 
     if (repositories.schedules.batchUpdate) {
-      await repositories.schedules.batchUpdate(updates)
-      return true
+      return repositories.schedules.batchUpdate(updates)
     }
 
+    const updated: Schedule[] = []
     for (const update of updates) {
-      await repositories.schedules.update(update.id, update.data)
+      updated.push(await repositories.schedules.update(update.id, update.data))
     }
 
-    return true
+    return updated
   }
 
   async transferCellSchedules(params: TransferCellSchedulesParams): Promise<TransferCellSchedulesResult> {
@@ -217,7 +227,7 @@ export class ScheduleService {
 
     const sourceSchedules = getSchedulesForCell(schedules, sourceDate, sourceShiftId)
     if (sourceSchedules.length === 0) {
-      return { createdCount: 0, conflictCount: 0 }
+      return { createdCount: 0, conflictCount: 0, createdSchedules: [], deletedIds: [] }
     }
 
     const sourceShift = await repositories.shifts.getById(sourceShiftId)
@@ -280,13 +290,14 @@ export class ScheduleService {
       await Promise.all(toDelete.map((id) => repositories.schedules.delete(id)))
     }
 
-    if (toCreate.length > 0) {
-      await repositories.schedules.batchCreate(toCreate)
-    }
+    const createdSchedules =
+      toCreate.length > 0 ? await repositories.schedules.batchCreate(toCreate) : []
 
     return {
-      createdCount: toCreate.length,
+      createdCount: createdSchedules.length,
       conflictCount,
+      createdSchedules,
+      deletedIds: toDelete,
     }
   }
 }

@@ -4,19 +4,36 @@ import { ElMessage, ElMessageBox } from 'element-plus'
 import {
   AUTH_EXPIRY_KEY,
   AUTH_STORAGE_KEY,
+  AUTO_LOGOUT_ENABLED_KEY,
+  AUTO_LOGOUT_TOTAL_KEY,
   AUTO_LOGOUT_TOTAL_MINUTES,
+  AUTO_LOGOUT_WARNING_KEY,
   AUTO_LOGOUT_WARNING_MINUTES,
 } from '@/utils'
 
-const WARNING_TIMEOUT_MS = AUTO_LOGOUT_WARNING_MINUTES * 60 * 1000
-const FORCE_LOGOUT_TIMEOUT_MS =
-  (AUTO_LOGOUT_TOTAL_MINUTES - AUTO_LOGOUT_WARNING_MINUTES) * 60 * 1000
 const ACTIVITY_EVENTS: Array<keyof DocumentEventMap> = [
   'mousedown',
   'keydown',
   'scroll',
   'touchstart',
 ]
+
+function getAutoLogoutConfig() {
+  const enabledRaw = localStorage.getItem(AUTO_LOGOUT_ENABLED_KEY)
+  const warningRaw = Number(localStorage.getItem(AUTO_LOGOUT_WARNING_KEY))
+  const totalRaw = Number(localStorage.getItem(AUTO_LOGOUT_TOTAL_KEY))
+
+  const enabled = enabledRaw === null ? true : enabledRaw === 'true'
+  const warningMinutes = Number.isFinite(warningRaw) && warningRaw >= 1 ? warningRaw : AUTO_LOGOUT_WARNING_MINUTES
+  const totalMinutes =
+    Number.isFinite(totalRaw) && totalRaw > warningMinutes ? totalRaw : AUTO_LOGOUT_TOTAL_MINUTES
+
+  return {
+    enabled,
+    warningMinutes,
+    totalMinutes: totalMinutes > warningMinutes ? totalMinutes : warningMinutes + 1,
+  }
+}
 
 export function useAutoLogout() {
   const route = useRoute()
@@ -68,10 +85,12 @@ export function useAutoLogout() {
   const resetTimers = () => {
     clearTimers()
     if (route.path === '/login' || !isAuthenticated()) return
+    const config = getAutoLogoutConfig()
+    if (!config.enabled) return
 
     warningTimer = setTimeout(() => {
       void showWarning()
-    }, WARNING_TIMEOUT_MS)
+    }, config.warningMinutes * 60 * 1000)
   }
 
   const handleWarningClosed = () => {
@@ -86,17 +105,19 @@ export function useAutoLogout() {
 
   const showWarning = async () => {
     if (warningVisible || route.path === '/login' || !isAuthenticated()) return
+    const config = getAutoLogoutConfig()
+    if (!config.enabled) return
 
     warningVisible = true
     forceLogoutTimer = setTimeout(() => {
       warningVisible = false
       void logout('长时间未操作，已自动退出登录')
-    }, FORCE_LOGOUT_TIMEOUT_MS)
+    }, (config.totalMinutes - config.warningMinutes) * 60 * 1000)
 
     try {
       await ElMessageBox.confirm(
-        `您已连续 ${AUTO_LOGOUT_WARNING_MINUTES} 分钟未操作，再过 ${
-          AUTO_LOGOUT_TOTAL_MINUTES - AUTO_LOGOUT_WARNING_MINUTES
+        `您已连续 ${config.warningMinutes} 分钟未操作，再过 ${
+          config.totalMinutes - config.warningMinutes
         } 分钟将自动退出登录。`,
         '会话超时提醒',
         {
