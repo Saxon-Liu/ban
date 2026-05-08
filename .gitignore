@@ -1,29 +1,3 @@
-# Dependencies
-node_modules/
-jspm_packages/
-web_modules/
-
-# Build output
-dist/
-*.zip
-.output
-.next
-out
-.nuxt
-.svelte-kit/
-.vuepress/dist
-**/.vitepress/dist
-
-# Package artifacts
-*.tgz
-
-# Local editor / tool state
-.history/
-.trae/
-.idea/
-.vscode/
-.vscode-test/
-
 # Logs
 logs
 *.log
@@ -33,96 +7,28 @@ yarn-error.log*
 pnpm-debug.log*
 lerna-debug.log*
 
-# Reports and runtime data
-report.[0-9]*.[0-9]*.[0-9]*.[0-9]*.json
-pids
-*.pid
-*.pid.lock
-*.seed
+# Dependencies
+node_modules/
 
-# Environment files
+# Build output
+dist/
+
+# Local env files
 .env
 .env.*
 !.env.example
 
-# Cache and coverage
-.cache
-.cache/
-.parcel-cache
-.vite/
-.npm
-.pnpm-store
-.eslintcache
-.stylelintcache
-.node_repl_history
-.yarn-integrity
-.nyc_output
-coverage
-*.lcov
-*.tsbuildinfo
-vite.config.js.timestamp-*
-vite.config.ts.timestamp-*
-
-# Yarn
-.pnp.*
-.yarn/*
-!.yarn/patches
-!.yarn/plugins
-!.yarn/releases
-!.yarn/sdks
-!.yarn/versions
-
-# Tool temp / build dirs
-lib-cov
-.grunt
-bower_components
-build/Release
-.lock-wscript
-.serverless/
-.firebase/
-.dynamodb/
-.fusebox/
-.tern-port
-**/.vitepress/cache
-.temp
-
-# OS files
+# Editor directories and files
+.vscode/
+.idea/
 .DS_Store
 Thumbs.db
-desktop.ini
 
-# Temporary files
-*.tmp
-*.temp
-*.bak
-*.swp
-*.swo
+# Vite cache
+vite.config.js.timestamp-*
+vite.config.ts.timestamp-*
+.vite/
 
-# Local test / export / backup data
-exports/
-backups/
-backup/
-data/
-*.db
-*.sqlite
-*.sqlite3
-*.json.bak
-*.xlsx
-*.xls
-*.csv
-*.tsv
-*.pdf
-*.png
-*.jpg
-*.jpeg
-*.webp
-
-# Keep source assets if they are added under src/public in the future
-!src/**/*.png
-!src/**/*.jpg
-!src/**/*.jpeg
-!src/**/*.webp
-!public/**/*.png
-!public/**/*.jpg
-!public/**/*.jpeg
-!public/**/*.webp
+# Local project-only directories
+.history/
+.trae/
