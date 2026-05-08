@@ -255,6 +255,11 @@ export class ScheduleService {
       throw new Error('该班次已归档，仅保留历史排班，不可继续排班')
     }
 
+    const personIds = [...new Set(sourceSchedules.map(s => s.personId))]
+    for (const personId of personIds) {
+      await assertActiveSchedulingEntities(personId, targetShiftId)
+    }
+
     const db = await dbManager.getDB()
     const tx = db.transaction('schedules', 'readwrite')
     const store = tx.store
@@ -286,8 +291,6 @@ export class ScheduleService {
     let conflictCount = 0
 
     for (const source of currentSourceSchedules) {
-      await assertActiveSchedulingEntities(source.personId, targetShiftId)
-
       const existingTargetSchedule = existingByTargetDate.get(source.personId)
       const canReuseSameDaySchedule =
         mode === 'move' &&
@@ -313,7 +316,7 @@ export class ScheduleService {
           order: maxOrder,
           updatedAt: now,
         }
-        await store.put(updatedSchedule)
+        store.put(updatedSchedule)
         updatedSchedules.push(updatedSchedule)
         targetPersonIds.add(source.personId)
         existingByTargetDate.set(source.personId, updatedSchedule)
@@ -330,13 +333,13 @@ export class ScheduleService {
         createdAt: now,
         updatedAt: now,
       }
-      await store.add(createdSchedule)
+      store.add(createdSchedule)
       createdSchedules.push(createdSchedule)
       targetPersonIds.add(source.personId)
       existingByTargetDate.set(source.personId, createdSchedule)
 
       if (mode === 'move') {
-        await store.delete(source.id)
+        store.delete(source.id)
         deletedIds.push(source.id)
       }
     }

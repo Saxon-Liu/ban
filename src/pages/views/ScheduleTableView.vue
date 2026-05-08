@@ -758,7 +758,7 @@ const handleCellDrop = async (
         if (stats && stats.remainingRestDays <= 0) {
           try {
             await ElMessageBox.confirm(
-              `${person.name} 的剩余休息天数为 ${stats.remainingRestDays}，确定要继续排休吗？`,
+              `${person.name} 已超额排休 ${Math.abs(stats.remainingRestDays)} 天，确定要继续排休吗？`,
               "超额排休提醒",
               {
                 confirmButtonText: "确定",
