@@ -171,6 +171,22 @@ npm run build:all
 - `build:all`：一次生成全部桌面产物
 - `pack:dir`：仅生成 `win-unpacked` 目录，便于调试桌面构建结果
 
+### 发布到 GitHub Release
+
+仓库已支持通过 GitHub Actions 自动发布桌面安装包。
+
+触发方式：
+
+1. 更新 `package.json` 中的版本号
+2. 提交代码并推送到远端
+3. 创建并推送形如 `v1.2.0` 的 Git tag
+
+对应 tag 推送后，GitHub Actions 会在 `windows-latest` 上自动构建，并在 GitHub Release 页面上传：
+
+- 安装版 `exe`
+- 便携版 `exe`
+- 绿色版 `zip`
+
 ## 打包产物
 
 Electron 打包输出位于：
