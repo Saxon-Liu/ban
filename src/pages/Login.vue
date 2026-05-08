@@ -102,17 +102,19 @@ import { ref, reactive } from 'vue'
 import { Lock } from '@element-plus/icons-vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
-import { DEFAULT_KEY, CUSTOM_KEY_STORAGE, RESET_CODE } from '@/utils/constants'
-import { startAuthSession } from '@/utils'
+import {
+  clearCustomSecret,
+  invalidateAuthSessions,
+  setCustomSecret,
+  startAuthSession,
+  verifyLoginSecret,
+  verifyResetCode,
+} from '@/utils'
 
 const router = useRouter()
 const route = useRoute()
 const formRef = ref<FormInstance>()
 const loading = ref(false)
-
-const getCorrectKey = () => {
-  return localStorage.getItem(CUSTOM_KEY_STORAGE) || DEFAULT_KEY
-}
 
 const showResetDialog = ref(false)
 const resetFormRef = ref<FormInstance>()
@@ -125,8 +127,27 @@ const resetForm = reactive({
 const resetRules: FormRules = {
   resetCode: [{ required: true, message: '请输入恢复码', trigger: 'blur' }],
   customKey: [
-    { required: true, message: '请输入新密码', trigger: 'blur' },
-    { min: 4, message: '密码长度不能少于4位', trigger: 'blur' },
+    {
+      validator: (_rule, value, callback) => {
+        if (resetMode.value !== 'custom') {
+          callback()
+          return
+        }
+
+        if (!value) {
+          callback(new Error('请输入新密码'))
+          return
+        }
+
+        if (value.length < 4) {
+          callback(new Error('密码长度不能少于4位'))
+          return
+        }
+
+        callback()
+      },
+      trigger: 'blur',
+    },
   ],
 }
 
@@ -138,18 +159,20 @@ const handleResetPassword = async () => {
     return
   }
 
-  if (resetForm.resetCode !== RESET_CODE) {
+  if (!(await verifyResetCode(resetForm.resetCode))) {
     ElMessage.error('恢复码不正确')
     return
   }
 
   if (resetMode.value === 'default') {
-    localStorage.removeItem(CUSTOM_KEY_STORAGE)
+    clearCustomSecret()
     ElMessage.success('密码已恢复为默认值，请使用默认密码登录')
   } else {
-    localStorage.setItem(CUSTOM_KEY_STORAGE, resetForm.customKey)
+    await setCustomSecret(resetForm.customKey)
     ElMessage.success('密码已重置，请使用新密码登录')
   }
+
+  invalidateAuthSessions()
 
   showResetDialog.value = false
   resetForm.resetCode = ''
@@ -188,7 +211,7 @@ const handleLogin = async () => {
   }
 
   try {
-    if (form.secretKey !== getCorrectKey()) {
+    if (!(await verifyLoginSecret(form.secretKey))) {
       ElMessage.error('密钥错误，请重试')
       form.secretKey = ''
       return

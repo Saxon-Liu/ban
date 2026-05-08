@@ -126,58 +126,71 @@
 
 <script setup lang="ts">
 import { ref, reactive } from "vue";
-import { ElLoading, ElMessage, ElMessageBox } from "element-plus";
-import { repositories } from "@/repositories";
+import { useRouter } from "vue-router";
+import { ElLoading, ElMessage, ElMessageBox, type FormInstance, type FormRules } from "element-plus";
 import { dbManager } from "@/repositories/IndexedDBManager";
-import { getCurrentDateTime } from "@/utils/common";
 import { initializeDefaultShifts } from "@/services/initialization";
-import { DEFAULT_SHIFTS, DEFAULT_KEY, CUSTOM_KEY_STORAGE } from "@/utils";
-import type { Shift, Schedule } from "@/types";
+import {
+  assertImportPayload,
+  exportConfiguration,
+  importConfiguration,
+} from "@/services";
+import {
+  clearCustomSecret,
+  invalidateAuthSessions,
+  setCustomSecret,
+  verifyLoginSecret,
+} from "@/utils";
 import type { LoadingInstance } from "element-plus/es/components/loading/src/loading";
 
 const fileInput = ref<HTMLInputElement | null>(null);
+const router = useRouter()
 const reinitializing = ref(false);
 const exportSchedules = ref(true);
 const importArchivedPeople = ref(false);
 const replaceAllBeforeImport = ref(false);
 let reinitializeLoading: LoadingInstance | null = null;
 
-const getCorrectKey = () => {
-  return localStorage.getItem(CUSTOM_KEY_STORAGE) || DEFAULT_KEY
-}
-
 const showChangePasswordDialog = ref(false)
 const changingPassword = ref(false)
-const passwordFormRef = ref()
+const passwordFormRef = ref<FormInstance>()
 const passwordForm = reactive({
   currentPassword: '',
   newPassword: '',
   confirmPassword: '',
 })
 
-const validateCurrentPassword = (_rule: any, value: string, callback: any) => {
+const validateCurrentPassword = (
+  _rule: unknown,
+  value: string,
+  callback: (error?: Error) => void
+) => {
   if (!value) {
     callback(new Error('请输入当前密码'))
-  } else if (value !== getCorrectKey()) {
-    callback(new Error('当前密码不正确'))
   } else {
     callback()
   }
 }
 
-const validateNewPassword = (_rule: any, value: string, callback: any) => {
+const validateNewPassword = (
+  _rule: unknown,
+  value: string,
+  callback: (error?: Error) => void
+) => {
   if (!value) {
     callback(new Error('请输入新密码'))
   } else if (value.length < 4) {
     callback(new Error('密码长度不能少于4位'))
-  } else if (value === getCorrectKey()) {
-    callback(new Error('新密码不能与当前密码相同'))
   } else {
     callback()
   }
 }
 
-const validateConfirmPassword = (_rule: any, value: string, callback: any) => {
+const validateConfirmPassword = (
+  _rule: unknown,
+  value: string,
+  callback: (error?: Error) => void
+) => {
   if (!value) {
     callback(new Error('请再次输入新密码'))
   } else if (value !== passwordForm.newPassword) {
@@ -187,7 +200,7 @@ const validateConfirmPassword = (_rule: any, value: string, callback: any) => {
   }
 }
 
-const passwordRules = {
+const passwordRules: FormRules = {
   currentPassword: [{ validator: validateCurrentPassword, trigger: 'blur' }],
   newPassword: [{ validator: validateNewPassword, trigger: 'blur' }],
   confirmPassword: [{ validator: validateConfirmPassword, trigger: 'blur' }],
@@ -206,12 +219,24 @@ const handleChangePassword = async () => {
 
   changingPassword.value = true
   try {
-    localStorage.setItem(CUSTOM_KEY_STORAGE, passwordForm.newPassword)
-    ElMessage.success('密码修改成功，下次登录请使用新密码')
+    if (!(await verifyLoginSecret(passwordForm.currentPassword))) {
+      ElMessage.error('当前密码不正确')
+      return
+    }
+
+    if (await verifyLoginSecret(passwordForm.newPassword)) {
+      ElMessage.error('新密码不能与当前密码相同')
+      return
+    }
+
+    await setCustomSecret(passwordForm.newPassword)
+    invalidateAuthSessions()
+    ElMessage.success('密码修改成功，当前登录会话已失效')
     showChangePasswordDialog.value = false
     passwordForm.currentPassword = ''
     passwordForm.newPassword = ''
     passwordForm.confirmPassword = ''
+    await router.replace('/login')
   } catch (error) {
     console.error('修改密码失败:', error)
     ElMessage.error('修改密码失败')
@@ -220,69 +245,12 @@ const handleChangePassword = async () => {
   }
 }
 
-const normalizeShifts = (shifts: Shift[] = []) => {
-  const defaultRestShift = DEFAULT_SHIFTS.find((shift) => shift.isRest);
-  const dedupMap = new Map<string, Shift>();
-  const shiftIdMap = new Map<string, string>();
-
-  for (const shift of shifts) {
-    const normalized: Shift = { ...shift } as Shift;
-    if (shift.isRest) {
-      if (defaultRestShift) {
-        shiftIdMap.set(shift.id, defaultRestShift.id);
-        normalized.id = defaultRestShift.id;
-        normalized.name = shift.name || defaultRestShift.name;
-        normalized.color = shift.color || defaultRestShift.color;
-      }
-      normalized.isRest = true;
-    } else {
-      shiftIdMap.set(shift.id, shift.id);
-    }
-
-    if (dedupMap.has(normalized.id)) {
-      dedupMap.set(normalized.id, { ...dedupMap.get(normalized.id)!, ...normalized });
-    } else {
-      dedupMap.set(normalized.id, normalized);
-    }
-  }
-
-  return {
-    shifts: Array.from(dedupMap.values()),
-    shiftIdMap,
-  };
-};
-
 /**
  * 导出配置
  */
 const handleExport = async () => {
   try {
-    const [people, shifts, extraRestConfigs, scheduleData] = await Promise.all([
-      repositories.people.getAllIncludingArchived(),
-      repositories.shifts.getAllIncludingArchived(),
-      repositories.extraRestConfigs.getAll(),
-      exportSchedules.value ? repositories.schedules.getAll() : Promise.resolve([]),
-    ]);
-
-    const { shifts: normalizedShifts } = normalizeShifts(shifts as Shift[]);
-    const normalizedSchedules = exportSchedules.value
-      ? (scheduleData as Schedule[]).map((schedule) => ({
-          ...schedule,
-          createdAt: schedule.createdAt?.toString?.() ?? schedule.createdAt,
-          updatedAt: schedule.updatedAt?.toString?.() ?? schedule.updatedAt,
-        }))
-      : undefined;
-
-    const configData = {
-      version: "1.0",
-      timestamp: new Date().toISOString(),
-      data: {
-        people,
-        shifts: normalizedShifts,
-        extraRestConfigs,
-        schedules: normalizedSchedules,
-      },
-    };
+    const configData = await exportConfiguration(exportSchedules.value)
 
     const blob = new Blob([JSON.stringify(configData, null, 2)], {
       type: "application/json",
@@ -300,9 +268,11 @@ const handleExport = async () => {
     URL.revokeObjectURL(url);
 
     ElMessage.success("配置导出成功");
-  } catch (error: any) {
+  } catch (error: unknown) {
     console.error("导出配置失败:", error);
-    ElMessage.error("导出配置失败: " + (error.message || "未知错误"));
+    ElMessage.error(
+      "导出配置失败: " + (error instanceof Error ? error.message : "未知错误")
+    );
   }
 };
 
@@ -353,9 +323,11 @@ const handleReinitialize = async () => {
     await dbManager.deleteDatabase();
     await initializeDefaultShifts();
     if (reinitializeResetPassword.value) {
-      localStorage.removeItem(CUSTOM_KEY_STORAGE);
+      clearCustomSecret();
+      invalidateAuthSessions();
       ElMessage.success("系统已重新初始化，登录密码已重置为默认值，页面即将刷新");
     } else {
+      invalidateAuthSessions();
       ElMessage.success("系统已重新初始化，页面即将刷新");
     }
     setTimeout(() => window.location.reload(), 1200);
@@ -389,11 +361,8 @@ const handleFileChange = async (event: Event) => {
 
   try {
     const text = await file.text();
-    const configData = JSON.parse(text);
-
-    if (!configData.data || !configData.data.people || !configData.data.shifts) {
-      throw new Error("无效的配置文件格式");
-    }
+    const configData = JSON.parse(text) as unknown;
+    assertImportPayload(configData)
 
     await ElMessageBox.confirm(
       replaceAllBeforeImport.value
@@ -411,7 +380,7 @@ const handleFileChange = async (event: Event) => {
       }
     );
 
-    await importData(configData.data, {
+    await importConfiguration(configData.data, {
       importArchivedPeople: importArchivedPeople.value,
       replaceAllBeforeImport: replaceAllBeforeImport.value,
     });
@@ -422,10 +391,10 @@ const handleFileChange = async (event: Event) => {
       window.location.reload();
     }, 1500);
 
-  } catch (error: any) {
+  } catch (error: unknown) {
     if (error !== "cancel") {
       console.error("导入配置失败:", error);
-      const errorMsg = error.message || "未知错误";
+      const errorMsg = error instanceof Error ? error.message : "未知错误";
       ElMessage.error({
         message: `导入配置失败: ${errorMsg}`,
         duration: 5000,
@@ -435,162 +404,6 @@ const handleFileChange = async (event: Event) => {
   }
 };
 
-/**
- * 将字符串时间戳转换为 Date 对象
- */
-const parseTimestamp = (value: any): Date => {
-  if (value instanceof Date) return value;
-  if (typeof value === 'string') return new Date(value);
-  return getCurrentDateTime();
-};
-
-const getScheduleSlotKey = (personId: string, date: string) =>
-  `${personId}::${date}`;
-
-/**
- * 执行数据导入
- */
-const importData = async (
-  data: any,
-  options: {
-    importArchivedPeople: boolean;
-    replaceAllBeforeImport: boolean;
-  }
-) => {
-  const { people, shifts, extraRestConfigs, schedules: schedulePayload } = data;
-  const now = getCurrentDateTime();
-  const db = await dbManager.getDB();
-
-  const transaction = db.transaction(
-    ['people', 'shifts', 'extraRestConfigs', 'schedules'],
-    'readwrite'
-  );
-
-  if (options.replaceAllBeforeImport) {
-    await Promise.all([
-      transaction.objectStore('schedules').clear(),
-      transaction.objectStore('people').clear(),
-      transaction.objectStore('extraRestConfigs').clear(),
-      transaction.objectStore('shifts').clear(),
-    ]);
-  }
-
-  const importedPersonIds = new Set<string>();
-  const importedShiftIds = new Set<string>();
-  const scheduleStore = transaction.objectStore('schedules');
-  const importedScheduleMap = new Map<string, any>();
-
-  // 导入人员
-  if (Array.isArray(people)) {
-    for (const p of people) {
-      // 验证必要字段
-      if (!p.id || !p.name) {
-        console.warn('跳过无效人员数据:', p);
-        continue;
-      }
-
-      const isArchived = Boolean(p.archivedAt);
-      if (isArchived && !options.importArchivedPeople) {
-        continue;
-      }
-      
-      const item = {
-        ...p,
-        createdAt: parseTimestamp(p.createdAt),
-        archivedAt: p.archivedAt ? parseTimestamp(p.archivedAt) : null,
-        updatedAt: now,
-      };
-      await transaction.objectStore('people').put(item);
-      importedPersonIds.add(p.id);
-    }
-  }
-
-  // 导入班次
-  const { shifts: normalizedShifts, shiftIdMap } = normalizeShifts(shifts as Shift[]);
-
-  if (Array.isArray(normalizedShifts)) {
-    for (const s of normalizedShifts) {
-      // 验证必要字段
-      if (!s.id || !s.name) {
-        console.warn('跳过无效班次数据:', s);
-        continue;
-      }
-
-      const item = {
-        ...s,
-        createdAt: parseTimestamp(s.createdAt),
-        archivedAt: s.archivedAt ? parseTimestamp(s.archivedAt) : null,
-        updatedAt: now,
-      };
-      await transaction.objectStore('shifts').put(item);
-      importedShiftIds.add(item.id);
-    }
-  }
-
-  // 导入额外休息配置
-  if (Array.isArray(extraRestConfigs)) {
-    for (const c of extraRestConfigs) {
-      // 验证必要字段
-      if (!c.id || typeof c.year !== 'number' || typeof c.month !== 'number') {
-        console.warn('跳过无效额外休息配置:', c);
-        continue;
-      }
-      
-      const item = {
-        ...c,
-        createdAt: parseTimestamp(c.createdAt),
-        updatedAt: now,
-      };
-      await transaction.objectStore('extraRestConfigs').put(item);
-    }
-  }
-
-  // 导入排班记录（若存在）
-  if (Array.isArray(schedulePayload)) {
-    for (const schedule of schedulePayload) {
-      if (!schedule.id || !schedule.personId || !schedule.shiftId || !schedule.date) {
-        console.warn("跳过无效排班记录:", schedule);
-        continue;
-      }
-
-      if (!options.importArchivedPeople && !importedPersonIds.has(schedule.personId)) {
-        continue;
-      }
-
-      const mappedShiftId = shiftIdMap.get(schedule.shiftId) || schedule.shiftId;
-      if (!importedShiftIds.has(mappedShiftId)) {
-        continue;
-      }
-
-      const item = {
-        ...schedule,
-        shiftId: mappedShiftId,
-        createdAt: parseTimestamp(schedule.createdAt),
-        updatedAt: parseTimestamp(schedule.updatedAt),
-      };
-      importedScheduleMap.set(
-        getScheduleSlotKey(item.personId, item.date),
-        item
-      );
-    }
-  }
-
-  for (const item of importedScheduleMap.values()) {
-    const existing = await scheduleStore.index('by-personId-date').get([
-      item.personId,
-      item.date,
-    ]);
-
-    if (existing && existing.id !== item.id) {
-      await scheduleStore.delete(existing.id);
-    }
-
-    await scheduleStore.put(item);
-  }
-
-  // 只需等待事务完成
-  await transaction.done;
-};
 </script>
 
 <style lang="scss" scoped>

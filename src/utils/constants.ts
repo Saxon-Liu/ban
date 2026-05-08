@@ -75,10 +75,9 @@ export const DB_TABLES = {
  * 路由路径常量
  */
 export const ROUTE_PATHS = {
+  LOGIN: '/login',
   SCHEDULE: '/schedule',
-  PEOPLE: '/people',
-  SHIFTS: '/shifts',
-  EXTRA_REST: '/extra-rest',
+  DASHBOARD: '/dashboard',
 } as const
 
 /**
@@ -115,8 +114,14 @@ export const WEEKDAY_NAMES = [
 export const AUTH_STORAGE_KEY = 'auth-token'
 /** 登录绝对过期时间戳的存储键 */
 export const AUTH_EXPIRY_KEY = 'auth-expiry'
-/** 自定义登录密码的存储键 */
-export const CUSTOM_KEY_STORAGE = 'custom-secret-key'
+/** 当前认证口令版本号的存储键 */
+export const AUTH_CREDENTIAL_VERSION_KEY = 'auth-credential-version'
+/** 当前会话绑定的口令版本号 */
+export const AUTH_SESSION_VERSION_KEY = 'auth-session-version'
+/** 自定义登录密码哈希的存储键 */
+export const CUSTOM_KEY_STORAGE = 'custom-secret-key-hash'
+/** 旧版明文密码存储键，仅用于迁移 */
+export const LEGACY_CUSTOM_KEY_STORAGE = 'custom-secret-key'
 /** 登录后的最长有效时长，属于绝对过期兜底 */
 export const AUTH_EXPIRY_HOURS = 1
 /** 默认无操作提醒时间 */
@@ -131,7 +136,7 @@ export const AUTO_LOGOUT_WARNING_KEY = 'auto-logout-warning'
 export const AUTO_LOGOUT_TOTAL_KEY = 'auto-logout-total'
 
 /**
- * 安全配置（在此集中修改默认密码和恢复码）
+ * 安全配置（源码内保留明文，便于本地维护）
  */
 export const SECURITY_CONFIG = {
   /** 默认登录密码 */
@@ -140,8 +145,5 @@ export const SECURITY_CONFIG = {
   RESET_CODE: '519519',
 }
 
-/**
- * 兼容导出（供现有代码使用）
- */
 export const DEFAULT_KEY = SECURITY_CONFIG.DEFAULT_KEY
 export const RESET_CODE = SECURITY_CONFIG.RESET_CODE
