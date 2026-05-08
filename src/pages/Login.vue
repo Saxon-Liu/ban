@@ -161,6 +161,13 @@ const form = reactive({
   secretKey: ''
 })
 
+const createAuthToken = () => {
+  if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+    return crypto.randomUUID()
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 12)}`
+}
+
 const rules: FormRules = {
   secretKey: [
     { required: true, message: '请输入密钥', trigger: 'blur' }
@@ -178,7 +185,7 @@ const handleLogin = async () => {
     setTimeout(() => {
       if (form.secretKey === getCorrectKey()) {
         const expiryTime = Date.now() + AUTH_EXPIRY_HOURS * 60 * 60 * 1000
-        localStorage.setItem(AUTH_STORAGE_KEY, 'authenticated')
+        localStorage.setItem(AUTH_STORAGE_KEY, createAuthToken())
         localStorage.setItem(AUTH_EXPIRY_KEY, String(expiryTime))
 
         ElMessage.success('登录成功')

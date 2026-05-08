@@ -468,10 +468,24 @@ const calculatePersonStatistics = (personId: string, month: string) => {
   });
 };
 
-const loadMonthSchedules = async () => {
-  if (!currentMonth.value) return;
+const mergeSchedules = (...items: Schedule[]) => {
+  const map = new Map(schedules.value.map((schedule) => [schedule.id, schedule]));
+  for (const item of items) {
+    map.set(item.id, item);
+  }
+  schedules.value = Array.from(map.values());
+};
 
-  schedules.value = await repositories.schedules.getByMonth(currentMonth.value);
+const replaceSchedules = (updatedSchedules: Schedule[]) => {
+  if (updatedSchedules.length === 0) return;
+  const map = new Map(updatedSchedules.map((schedule) => [schedule.id, schedule]));
+  schedules.value = schedules.value.map((schedule) => map.get(schedule.id) || schedule);
+};
+
+const removeSchedulesByIds = (ids: string[]) => {
+  if (ids.length === 0) return;
+  const deletedIds = new Set(ids);
+  schedules.value = schedules.value.filter((schedule) => !deletedIds.has(schedule.id));
 };
 
 const setMonth = async (month: string) => {
@@ -685,14 +699,14 @@ const handleCellDrop = async (
           s.shiftId === dragData.sourceShiftId
       );
       if (sourceSchedule) {
-        await scheduleService.removeScheduleByIdentity(
+        const removed = await scheduleService.removeScheduleByIdentity(
           dragData.personId,
           dragData.sourceDate,
           dragData.sourceShiftId
         );
-        schedules.value = schedules.value.filter(
-          (s) => s.id !== sourceSchedule.id
-        );
+        if (removed) {
+          removeSchedulesByIds([removed.id]);
+        }
       }
     }
 
@@ -746,7 +760,8 @@ const handleCellDrop = async (
       }
       ElMessage.success(msg);
 
-      await loadMonthSchedules();
+      removeSchedulesByIds(result.deletedIds);
+      mergeSchedules(...result.createdSchedules);
       handleDragEnd();
       return;
     }
@@ -793,24 +808,26 @@ const handleCellDrop = async (
     }
 
     if (targetIndex >= 0) {
-      await scheduleService.insertScheduleIntoCell({
+      const result = await scheduleService.insertScheduleIntoCell({
         personId: dragData.personId,
         shiftId,
         date,
         month: currentMonth.value!,
         targetIndex,
       });
+      replaceSchedules(result.updated);
+      mergeSchedules(result.created);
     } else {
-      await scheduleService.appendScheduleToCell({
+      const created = await scheduleService.appendScheduleToCell({
         personId: dragData.personId,
         shiftId,
         date,
         month: currentMonth.value!,
       });
+      mergeSchedules(created);
     }
 
     ElMessage.success("排班成功");
-    await loadMonthSchedules();
   } catch (error) {
     console.error("排班失败:", error);
     ElMessage.error("排班失败");
@@ -828,7 +845,7 @@ const handleTagReorder = async (
   shiftId: string,
   targetIndex: number
 ) => {
-  const changed = await scheduleService.reorderSchedulesInCell({
+  const updatedSchedules = await scheduleService.reorderSchedulesInCell({
     personId,
     date,
     shiftId,
@@ -836,10 +853,10 @@ const handleTagReorder = async (
     schedules: schedules.value,
   });
 
-  if (!changed) return;
+  if (!updatedSchedules) return;
 
+  replaceSchedules(updatedSchedules);
   ElMessage.success("已更新排序");
-  await loadMonthSchedules();
 };
 
 const handleCellHandleDragStart = (
@@ -961,8 +978,8 @@ const removeSchedule = async (
       shiftId
     );
     if (removed) {
+      removeSchedulesByIds([removed.id]);
       ElMessage.success("删除排班成功");
-      await loadMonthSchedules();
     }
   } catch (error) {
     console.error("删除排班失败:", error);

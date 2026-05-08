@@ -459,6 +459,20 @@ const loadSchedules = async () => {
   schedules.value = results.flat();
 };
 
+const mergeSchedules = (...items: Schedule[]) => {
+  const map = new Map(schedules.value.map((schedule) => [schedule.id, schedule]));
+  for (const item of items) {
+    map.set(item.id, item);
+  }
+  schedules.value = Array.from(map.values());
+};
+
+const removeSchedulesByIds = (ids: string[]) => {
+  if (ids.length === 0) return;
+  const deletedIds = new Set(ids);
+  schedules.value = schedules.value.filter((schedule) => !deletedIds.has(schedule.id));
+};
+
 const loadData = async () => {
   loading.value = true;
   try {
@@ -520,17 +534,19 @@ const assignShiftToPerson = async (
   date: string
 ) => {
   try {
-    const outcome = await scheduleService.assignShiftToPerson({
+    const result = await scheduleService.assignShiftToPerson({
       personId,
       shiftId,
       date,
     });
-    if (outcome === "same-shift") {
+    if (result.outcome === "same-shift") {
       ElMessage.info("该日期已是此班次");
       return;
     }
-    ElMessage.success(outcome === "updated" ? "已更新班次" : "排班成功");
-    await loadSchedules();
+    if (result.schedule) {
+      mergeSchedules(result.schedule);
+    }
+    ElMessage.success(result.outcome === "updated" ? "已更新班次" : "排班成功");
   } catch (error: any) {
     if (error === "cancel") return;
     console.error("排班失败", error);
@@ -543,13 +559,15 @@ const removeSchedule = async (personId: string, date: string) => {
   if (!schedule) return;
 
   try {
-    await scheduleService.removeScheduleByIdentity(
+    const removed = await scheduleService.removeScheduleByIdentity(
       personId,
       date,
       schedule.shiftId
     );
+    if (removed) {
+      removeSchedulesByIds([removed.id]);
+    }
     ElMessage.success("已删除排班");
-    await loadSchedules();
   } catch (error) {
     console.error("删除排班失败", error);
     ElMessage.error("删除排班失败，请稍后再试");
@@ -655,9 +673,15 @@ const handleClearPersonSchedules = async (person: Person) => {
       person.id,
       currentMonth.value
     );
+    schedules.value = schedules.value.filter(
+      (schedule) =>
+        !(
+          schedule.personId === person.id &&
+          schedule.month === currentMonth.value
+        )
+    );
 
     ElMessage.success(`已清空 ${person.name} 在当前月的排班`);
-    await loadSchedules();
   } catch (error) {
     console.error("清空个人排班失败", error);
     ElMessage.error("清空个人排班失败，请稍后重试");

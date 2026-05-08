@@ -120,6 +120,9 @@ export const CUSTOM_KEY_STORAGE = 'custom-secret-key'
 export const AUTH_EXPIRY_HOURS = 24
 export const AUTO_LOGOUT_WARNING_MINUTES = 2
 export const AUTO_LOGOUT_TOTAL_MINUTES = 5
+export const AUTO_LOGOUT_ENABLED_KEY = 'auto-logout-enabled'
+export const AUTO_LOGOUT_WARNING_KEY = 'auto-logout-warning'
+export const AUTO_LOGOUT_TOTAL_KEY = 'auto-logout-total'
 
 /**
  * 安全配置（在此集中修改默认密码和恢复码）
