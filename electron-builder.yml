@@ -1,0 +1,29 @@
+appId: com.paiban.electron
+productName: 班
+compression: store
+directories:
+  output: release/${version}
+files:
+  - dist/**/*
+  - dist-electron/**/*
+  - resources/**/*
+  - package.json
+artifactName: ${productName}-${version}-绿色版.${ext}
+portable:
+  artifactName: ${productName}-${version}-便携版.${ext}
+nsis:
+  oneClick: false
+  allowToChangeInstallationDirectory: true
+  artifactName: ${productName}-${version}-安装版.${ext}
+win:
+  icon: resources/icon.ico
+  target:
+    - target: portable
+      arch:
+        - x64
+    - target: nsis
+      arch:
+        - x64
+    - target: zip
+      arch:
+        - x64
