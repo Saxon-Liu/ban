@@ -362,10 +362,9 @@ class AppManager {
 
     app.on('child-process-gone', (_event, details) => {
       this.logDiagnostics('error', '子进程终止', 'child-process-gone', { details })
-    })
-
-    app.on('gpu-process-crashed', (_event, killed) => {
-      this.logDiagnostics('error', 'GPU 进程崩溃', 'gpu-process-crashed', { killed })
+      if (details.type === 'GPU') {
+        this.logDiagnostics('error', 'GPU 进程崩溃', 'gpu-process-gone', { details })
+      }
     })
   }
 
