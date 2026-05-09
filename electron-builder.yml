@@ -8,13 +8,13 @@ files:
   - dist-electron/**/*
   - resources/**/*
   - package.json
-artifactName: schedule-management-${version}-green.${ext}
+artifactName: ban-${version}-green.${ext}
 portable:
-  artifactName: schedule-management-${version}-portable.${ext}
+  artifactName: ban-${version}-portable.${ext}
 nsis:
   oneClick: false
   allowToChangeInstallationDirectory: true
-  artifactName: schedule-management-${version}-setup.${ext}
+  artifactName: ban-${version}-setup.${ext}
 win:
   icon: resources/icon.ico
   target:

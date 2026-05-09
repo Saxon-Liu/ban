@@ -28,16 +28,14 @@ jobs:
 
       - name: Build release packages
         run: npm run build:all
-        env:
-          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Upload workflow artifacts
         uses: actions/upload-artifact@v4
         with:
           name: desktop-release-${{ github.ref_name }}
           path: |
-            release/**/*.exe
-            release/**/*.zip
+            release/*/ban-*.exe
+            release/*/ban-*.zip
           if-no-files-found: error
 
       - name: Publish GitHub Release
@@ -45,6 +43,7 @@ jobs:
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
+          overwrite_files: true
           files: |
-            release/**/*.exe
-            release/**/*.zip
+            release/*/ban-*.exe
+            release/*/ban-*.zip
