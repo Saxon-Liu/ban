@@ -70,6 +70,52 @@ export interface ExtraRestConfig extends BaseEntity {
   extraRestDays: number
 }
 
+export type HolidayRegion = 'CN'
+
+export type HolidayType = 'public_holiday' | 'transfer_workday'
+
+export type HolidaySource = 'builtin' | 'remote' | 'manual-import'
+
+/**
+ * 法定节假日与调休工作日实体
+ */
+export interface HolidayCalendarEntry extends BaseEntity {
+  /** 日期（YYYY-MM-DD格式） */
+  date: string
+  /** 年份 */
+  year: number
+  /** 地区 */
+  region: HolidayRegion
+  /** 原始名称 */
+  name: string
+  /** 中文名称 */
+  nameCn: string
+  /** 英文名称 */
+  nameEn: string
+  /** 日期类型 */
+  type: HolidayType
+  /** 数据来源 */
+  source: HolidaySource
+}
+
+/**
+ * 节假日同步状态
+ */
+export interface HolidaySyncState extends BaseEntity {
+  /** 地区 */
+  region: HolidayRegion
+  /** 年份 */
+  year: number
+  /** 最近成功使用的数据源 */
+  lastSourceUrl?: string
+  /** 最近同步时间 */
+  lastSyncAt?: Date
+  /** 最近同步结果 */
+  lastSyncStatus?: 'success' | 'failed'
+  /** 最近同步消息 */
+  lastSyncMessage?: string
+}
+
 /**
  * 人员统计信息
  */
