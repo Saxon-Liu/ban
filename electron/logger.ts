@@ -111,6 +111,10 @@ class Logger {
     return this.currentLogFile
   }
 
+  private isDevelopment() {
+    return !app.isPackaged || Boolean(process.env.VITE_DEV_SERVER_URL)
+  }
+
   private async ensureUtf8Bom(logFile: string) {
     try {
       const stat = await fsp.stat(logFile).catch(() => null)
@@ -172,7 +176,7 @@ class Logger {
         void this.processWriteQueue()
       })
 
-      if (level === 'error' || process.env.NODE_ENV === 'development') {
+      if (level === 'error' || this.isDevelopment()) {
         const prefix = `[${new Date().toISOString()}] [${level.toUpperCase()}] ${message}`
         if (level === 'error') {
           console.error(prefix, data || '')
@@ -198,7 +202,7 @@ class Logger {
   }
 
   debug(message: string, data?: unknown) {
-    if (process.env.NODE_ENV === 'development') {
+    if (this.isDevelopment()) {
       this.writeLog('debug', message, data)
     }
   }

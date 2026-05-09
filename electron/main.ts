@@ -59,6 +59,13 @@ class AppManager {
     return !app.isPackaged || Boolean(process.env.VITE_DEV_SERVER_URL)
   }
 
+  private shouldOpenDevTools() {
+    if (!this.isDevelopment()) {
+      return false
+    }
+    return process.env.ELECTRON_OPEN_DEVTOOLS !== '0'
+  }
+
   private buildContentSecurityPolicy() {
     const allowedOrigins = [...this.getDevOrigins()]
     const scriptSources = ["'self'"]
@@ -188,7 +195,9 @@ class AppManager {
     const rendererEntry = this.getRendererEntry()
     if (rendererEntry.type === 'url') {
       await this.mainWindow.loadURL(rendererEntry.value)
-      this.mainWindow.webContents.openDevTools()
+      if (this.shouldOpenDevTools()) {
+        this.mainWindow.webContents.openDevTools()
+      }
     } else {
       await this.mainWindow.loadFile(rendererEntry.value)
     }
