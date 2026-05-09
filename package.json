@@ -14,13 +14,15 @@
     "type-check": "vue-tsc --noEmit",
     "type-check:electron": "tsc -p tsconfig.electron.json --noEmit",
     "clean:release": "node -e \"const fs=require('fs'); const path=require('path'); const pkg=require('./package.json'); const target=path.join(process.cwd(),'release',pkg.version); fs.rmSync(target,{recursive:true,force:true}); console.log('cleaned', target);\"",
+    "holidays:update": "node scripts/update-builtin-holidays.js",
+    "holidays:update:strict": "node scripts/update-builtin-holidays.js --strict",
     "build:desktop": "npm run type-check && npm run type-check:electron && vite build --mode electron",
-    "build:portable": "npm run clean:release && npm run build:desktop && electron-builder --config electron-builder.yml --win portable --publish never",
-    "build:setup": "npm run clean:release && npm run build:desktop && electron-builder --config electron-builder.yml --win nsis --publish never",
-    "build:green": "npm run clean:release && npm run build:desktop && electron-builder --config electron-builder.yml --win zip --publish never",
-    "build:all": "npm run clean:release && npm run build:desktop && electron-builder --config electron-builder.yml --win portable nsis zip --publish never",
+    "build:portable": "npm run clean:release && npm run holidays:update && npm run build:desktop && electron-builder --config electron-builder.yml --win portable --publish never",
+    "build:setup": "npm run clean:release && npm run holidays:update && npm run build:desktop && electron-builder --config electron-builder.yml --win nsis --publish never",
+    "build:green": "npm run clean:release && npm run holidays:update && npm run build:desktop && electron-builder --config electron-builder.yml --win zip --publish never",
+    "build:all": "npm run clean:release && npm run holidays:update && npm run build:desktop && electron-builder --config electron-builder.yml --win portable nsis zip --publish never",
     "preview": "vite preview",
-    "pack:dir": "npm run clean:release && npm run build:desktop && electron-builder --config electron-builder.yml --dir --publish never"
+    "pack:dir": "npm run clean:release && npm run holidays:update && npm run build:desktop && electron-builder --config electron-builder.yml --dir --publish never"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.1",

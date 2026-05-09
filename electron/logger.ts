@@ -6,6 +6,7 @@ import electron from 'electron'
 const { app } = electron
 
 class Logger {
+  private static readonly UTF8_BOM = '\uFEFF'
   private logDir: string
   private currentLogFile: string | null = null
   private writeQueue: string[] = []
@@ -110,6 +111,17 @@ class Logger {
     return this.currentLogFile
   }
 
+  private async ensureUtf8Bom(logFile: string) {
+    try {
+      const stat = await fsp.stat(logFile).catch(() => null)
+      if (!stat || stat.size === 0) {
+        await fsp.writeFile(logFile, Logger.UTF8_BOM, { encoding: 'utf8', flag: 'a' })
+      }
+    } catch (error) {
+      console.error('写入日志 BOM 失败:', error)
+    }
+  }
+
   private formatMessage(level: string, message: string, data?: unknown) {
     const safeEntry = this.sanitize({
       timestamp: new Date().toISOString(),
@@ -134,7 +146,8 @@ class Logger {
     try {
       const logFile = this.getCurrentLogFile()
       if (logFile) {
-        await fsp.appendFile(logFile, `${batch.join('\n')}\n`)
+        await this.ensureUtf8Bom(logFile)
+        await fsp.appendFile(logFile, `${batch.join('\n')}\n`, 'utf8')
       }
     } catch (error) {
       console.error('批量写入日志失败:', error)

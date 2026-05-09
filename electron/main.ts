@@ -4,6 +4,7 @@ import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import electron from 'electron'
+import { HOLIDAY_REMOTE_CONNECT_SOURCES } from '../shared/holidayRemote'
 import { appLogger, errorLogger } from './logger'
 
 const { app, BrowserWindow, dialog, ipcMain, Menu, session } = electron
@@ -61,7 +62,11 @@ class AppManager {
   private buildContentSecurityPolicy() {
     const allowedOrigins = [...this.getDevOrigins()]
     const scriptSources = ["'self'"]
-    const connectSources = ["'self'", ...allowedOrigins]
+    const connectSources = [
+      "'self'",
+      ...allowedOrigins,
+      ...HOLIDAY_REMOTE_CONNECT_SOURCES,
+    ]
 
     if (this.isDevelopment()) {
       scriptSources.push("'unsafe-eval'")
@@ -276,7 +281,8 @@ class AppManager {
         throw new Error('没有可导出的日志')
       }
 
-      const writeStream = fs.createWriteStream(result.filePath)
+      const writeStream = fs.createWriteStream(result.filePath, { encoding: 'utf8' })
+      writeStream.write('\uFEFF')
       for (const file of logFiles) {
         writeStream.write(`===== ${file.name} =====\n`)
         writeStream.write(await fsp.readFile(file.path, 'utf8'))
@@ -313,6 +319,7 @@ class AppManager {
       'ws://127.0.0.1:2510',
       'http://localhost:2510',
       'ws://localhost:2510',
+      ...HOLIDAY_REMOTE_CONNECT_SOURCES,
       ...this.getDevOrigins(),
     ])
 
