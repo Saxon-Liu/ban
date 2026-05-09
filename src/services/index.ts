@@ -6,10 +6,14 @@
 export { initializeDefaultShifts, initializeSystem } from './initialization'
 export {
   assertImportPayload,
+  checkImportFileSize,
   exportConfiguration,
   importConfiguration,
+  ImportValidationError,
   normalizeImportedShifts,
+  validateImportData,
 } from './configTransfer'
+export type { ImportedConfigData, ValidationError } from './configTransfer'
 export { ExcelExportService, excelExportService } from './excelExport'
 export { ScheduleService, scheduleService } from './scheduleService'
 export {
