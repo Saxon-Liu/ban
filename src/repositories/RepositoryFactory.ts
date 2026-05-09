@@ -7,10 +7,12 @@ import type { PeopleRepository } from './PeopleRepository'
 import type { ShiftRepository } from './ShiftRepository'
 import type { ScheduleRepository } from './ScheduleRepository'
 import type { ExtraRestConfigRepository } from './ExtraRestConfigRepository'
+import type { HolidayCalendarRepository } from './HolidayCalendarRepository'
 import { IndexedDBPeopleRepository } from './IndexedDBPeopleRepository'
 import { IndexedDBShiftRepository } from './IndexedDBShiftRepository'
 import { IndexedDBScheduleRepository } from './IndexedDBScheduleRepository'
 import { IndexedDBExtraRestConfigRepository } from './IndexedDBExtraRestConfigRepository'
+import { IndexedDBHolidayCalendarRepository } from './IndexedDBHolidayCalendarRepository'
 
 /**
  * Repository工厂类
@@ -21,6 +23,7 @@ export class RepositoryFactory {
   private static shiftRepo: ShiftRepository | null = null
   private static scheduleRepo: ScheduleRepository | null = null
   private static extraRestConfigRepo: ExtraRestConfigRepository | null = null
+  private static holidayCalendarRepo: HolidayCalendarRepository | null = null
 
   /**
    * 获取人员Repository实例
@@ -62,6 +65,13 @@ export class RepositoryFactory {
     return this.extraRestConfigRepo
   }
 
+  static getHolidayCalendarRepository(): HolidayCalendarRepository {
+    if (!this.holidayCalendarRepo) {
+      this.holidayCalendarRepo = new IndexedDBHolidayCalendarRepository()
+    }
+    return this.holidayCalendarRepo
+  }
+
   /**
    * 重置所有Repository实例
    * 主要用于测试场景
@@ -71,6 +81,7 @@ export class RepositoryFactory {
     this.shiftRepo = null
     this.scheduleRepo = null
     this.extraRestConfigRepo = null
+    this.holidayCalendarRepo = null
   }
 }
 
@@ -83,4 +94,5 @@ export const repositories = {
   shifts: RepositoryFactory.getShiftRepository(),
   schedules: RepositoryFactory.getScheduleRepository(),
   extraRestConfigs: RepositoryFactory.getExtraRestConfigRepository(),
+  holidayCalendar: RepositoryFactory.getHolidayCalendarRepository(),
 } as const

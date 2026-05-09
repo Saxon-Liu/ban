@@ -15,6 +15,12 @@ export {
 } from './configTransfer'
 export type { ImportedConfigData, ValidationError } from './configTransfer'
 export { ExcelExportService, excelExportService } from './excelExport'
+export { HolidayService, holidayService } from './holidayService'
+export type {
+  EffectiveHolidayEntry,
+  HolidayManagementSummary,
+  HolidayYearStats,
+} from './holidayService'
 export { ScheduleService, scheduleService } from './scheduleService'
 export {
   buildPersonStatistics,

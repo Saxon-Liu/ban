@@ -15,7 +15,7 @@ const DB_CONFIG = {
   /** 数据库名称 */
   NAME: "ScheduleManagementDB",
   /** 数据库版本 */
-  VERSION: 3,
+  VERSION: 4,
 } as const;
 
 /**
@@ -101,6 +101,31 @@ export class IndexedDBManager {
           configsStore.createIndex("by-year", "year");
           configsStore.createIndex("by-month", "month");
           configsStore.createIndex("by-year-month", ["year", "month"], {
+            unique: true,
+          });
+        }
+
+        if (!db.objectStoreNames.contains("holidayCalendarEntries")) {
+          const holidayStore = db.createObjectStore("holidayCalendarEntries", {
+            keyPath: "id",
+          });
+          holidayStore.createIndex("by-date", "date");
+          holidayStore.createIndex("by-year", "year");
+          holidayStore.createIndex("by-region-year", ["region", "year"]);
+          holidayStore.createIndex("by-source", "source");
+          holidayStore.createIndex("by-year-source", ["year", "source"]);
+          holidayStore.createIndex("by-region-year-source", [
+            "region",
+            "year",
+            "source",
+          ]);
+        }
+
+        if (!db.objectStoreNames.contains("holidaySyncStates")) {
+          const syncStore = db.createObjectStore("holidaySyncStates", {
+            keyPath: "id",
+          });
+          syncStore.createIndex("by-region-year", ["region", "year"], {
             unique: true,
           });
         }
