@@ -114,15 +114,32 @@
                 <template #date-cell="{ data }">
                   <div
                     class="calendar-date-cell"
-                    :class="{ 'is-outside-month': !isCurrentMonthDate(data.day) }"
+                    :class="[
+                      { 'is-outside-month': !isCurrentMonthDate(data.day) },
+                      getHolidayCellClass(data.day),
+                    ]"
                     @click="handleCellClick(person.id, data.day, $event)"
                   >
                     <div class="date-top">
                       <span
                         class="day"
-                        :class="{ 'is-weekend': isWeekend(data.day) }"
+                        :class="{ 'is-weekend': isWeekend(data.day) && !getHolidayEntry(data.day) }"
                         >{{ formatMonthDay(data.day) }}</span
                       >
+                      <el-tooltip
+                        v-if="getHolidayEntry(data.day)"
+                        :content="`${getHolidayEntry(data.day)?.label}（${getHolidayEntry(data.day)?.typeLabel}）`"
+                        placement="top"
+                        effect="light"
+                      >
+                        <span
+                          class="holiday-badge"
+                          :class="getHolidayEntry(data.day)?.type"
+                        >
+                          {{ getHolidayEntry(data.day)?.marker }}
+                          {{ getHolidayEntry(data.day)?.label }}
+                        </span>
+                      </el-tooltip>
                       <!-- <span
                         class="weekday"
                         :class="{ 'is-weekend': isWeekend(data.day) }"
@@ -171,37 +188,79 @@
             </div>
           </template>
         </draggable>
-        <div v-if="selectedPersonIds.length !== 4" class="empty-state">
-          <el-empty :image-size="120">
-            <template #description>
-              <el-dropdown
-                trigger="click"
-                :disabled="availablePeople.length === 0"
-                @command="addPersonById"
-              >
-                <el-button type="primary" size="small" :icon="Plus"
-                  >点击选择人员</el-button
+        <div
+          v-if="selectedPersonIds.length !== 4"
+          :class="[
+            'empty-state',
+            selectedPersonIds.length > 0 ? 'is-compact' : 'is-empty',
+          ]"
+        >
+          <template v-if="selectedPersonIds.length === 0">
+            <el-empty :image-size="120">
+              <template #description>
+                <el-dropdown
+                  trigger="click"
+                  :disabled="availablePeople.length === 0"
+                  @command="addPersonById"
                 >
-                <template #dropdown>
-                  <el-dropdown-menu v-if="availablePeople.length > 0">
-                    <el-dropdown-item
-                      v-for="person in availablePeople"
-                      :key="person.id"
-                      :command="person.id"
-                    >
-                      <span class="dropdown-person-option">
-                        <span
-                          class="color-dot"
-                          :style="{ backgroundColor: person.color }"
-                        />
-                        <span>{{ person.name }}</span>
-                      </span>
-                    </el-dropdown-item>
-                  </el-dropdown-menu>
-                </template>
-              </el-dropdown>
-            </template>
-          </el-empty>
+                  <el-button type="primary" size="small" :icon="Plus"
+                    >点击选择人员</el-button
+                  >
+                  <template #dropdown>
+                    <el-dropdown-menu v-if="availablePeople.length > 0">
+                      <el-dropdown-item
+                        v-for="person in availablePeople"
+                        :key="person.id"
+                        :command="person.id"
+                      >
+                        <span class="dropdown-person-option">
+                          <span
+                            class="color-dot"
+                            :style="{ backgroundColor: person.color }"
+                          />
+                          <span>{{ person.name }}</span>
+                        </span>
+                      </el-dropdown-item>
+                    </el-dropdown-menu>
+                  </template>
+                </el-dropdown>
+              </template>
+            </el-empty>
+          </template>
+          <template v-else>
+            <div class="empty-state__compact-copy">
+              <div class="empty-state__title">继续添加人员</div>
+              <div class="empty-state__subtitle">
+                当前最多可同时展示 4 人日历
+              </div>
+            </div>
+            <el-dropdown
+              trigger="click"
+              :disabled="availablePeople.length === 0"
+              @command="addPersonById"
+            >
+              <el-button type="primary" size="small" :icon="Plus">
+                添加人员
+              </el-button>
+              <template #dropdown>
+                <el-dropdown-menu v-if="availablePeople.length > 0">
+                  <el-dropdown-item
+                    v-for="person in availablePeople"
+                    :key="person.id"
+                    :command="person.id"
+                  >
+                    <span class="dropdown-person-option">
+                      <span
+                        class="color-dot"
+                        :style="{ backgroundColor: person.color }"
+                      />
+                      <span>{{ person.name }}</span>
+                    </span>
+                  </el-dropdown-item>
+                </el-dropdown-menu>
+              </template>
+            </el-dropdown>
+          </template>
         </div>
       </div>
     </el-scrollbar>
@@ -228,7 +287,7 @@
             >
               <span
                 class="color-dot"
-                :style="{ backgroundColor: shift.color }"
+                :style="{ backgroundColor: getShiftColor(shift.id) }"
               />
               <span class="quick-select__name">{{ shift.name }}</span>
               <el-tag
@@ -264,7 +323,13 @@ import dayjs from "dayjs";
 import type { ExtraRestConfig, Person, Schedule } from "@/types";
 import { repositories } from "@/repositories";
 import { useScheduleViewData } from "@/composables/useScheduleViewData";
-import { buildPersonStatistics, getRestShiftId, scheduleService } from "@/services";
+import {
+  buildPersonStatistics,
+  getRestShiftId,
+  holidayService,
+  scheduleService,
+} from "@/services";
+import type { EffectiveHolidayEntry } from "@/services";
 import {
   getAdaptiveTextColor,
   getNextMonth,
@@ -319,6 +384,7 @@ const {
   shifts,
 } = useScheduleViewData();
 const extraRestConfigs = ref<Map<string, ExtraRestConfig>>(new Map());
+const holidayDateMap = ref<Map<string, EffectiveHolidayEntry>>(new Map());
 const selectedPersonIds = ref<string[]>(getInitialSelectedPersonIds());
 const calendarWrapperRef = ref<HTMLElement | null>(null);
 const wrapperWidth = ref(0);
@@ -458,11 +524,31 @@ const loadSchedules = async () => {
   schedules.value = results.flat();
 };
 
+const loadHolidayData = async () => {
+  if (!currentMonth.value) return;
+  await holidayService.ensureBuiltinHolidays();
+
+  const targetMonths = [
+    getPreviousMonth(currentMonth.value),
+    currentMonth.value,
+    getNextMonth(currentMonth.value),
+  ];
+  const results = await Promise.all(
+    targetMonths.map((month) =>
+      holidayService.getEffectiveMonthDateMap("CN", month)
+    )
+  );
+  holidayDateMap.value = new Map(
+    results.flatMap((monthMap) => Array.from(monthMap.entries()))
+  );
+};
+
 const loadData = async () => {
   loading.value = true;
   try {
     await loadBaseData();
     await loadSchedules();
+    await loadHolidayData();
   } catch (error) {
     console.error("加载人员或班次失败", error);
     ElMessage.error("加载失败，请稍后再试");
@@ -505,6 +591,15 @@ const isCurrentMonthDate = (date: string) =>
 const isWeekend = (date: string) => {
   const day = dayjs(date).day();
   return day === 0 || day === 6;
+};
+
+const getHolidayEntry = (date: string) => holidayDateMap.value.get(date) || null;
+
+const getHolidayCellClass = (date: string) => {
+  const holiday = getHolidayEntry(date);
+  if (holiday?.type === "public_holiday") return "is-holiday";
+  if (holiday?.type === "transfer_workday") return "is-transfer-workday";
+  return "";
 };
 
 const assignShiftToPerson = async (
@@ -708,6 +803,7 @@ watch(
   async (newMonth) => {
     if (newMonth) {
       await loadSchedules();
+      await loadHolidayData();
     }
   }
 );
@@ -880,7 +976,9 @@ defineExpose({
 
 /* 日历单元格 */
 .calendar-date-cell {
+  height: 100%;
   min-height: 50px;
+  box-sizing: border-box;
   display: flex;
   flex-direction: column;
   padding: 8px;
@@ -907,6 +1005,24 @@ defineExpose({
       color: var(--el-text-color-disabled);
     }
   }
+
+  &.is-holiday {
+    background: var(--el-color-primary-light-9);
+    border-color: var(--el-color-primary-light-7);
+
+    .day {
+      color: var(--el-color-primary);
+    }
+  }
+
+  &.is-transfer-workday {
+    background: var(--el-color-danger-light-9);
+    border-color: var(--el-color-danger-light-7);
+
+    .day {
+      color: var(--el-color-danger);
+    }
+  }
 }
 
 .date-top {
@@ -924,6 +1040,29 @@ defineExpose({
     &.is-weekend {
       color: var(--el-color-warning);
       font-weight: 600;
+    }
+  }
+
+  .holiday-badge {
+    max-width: 92px;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    padding: 1px 5px;
+    border-radius: 4px;
+    font-size: 11px;
+    line-height: 16px;
+
+    &.public_holiday {
+      color: var(--el-color-primary);
+      background: var(--el-color-primary-light-8);
+      border: 1px solid var(--el-color-primary-light-6);
+    }
+
+    &.transfer_workday {
+      color: var(--el-color-danger);
+      background: var(--el-color-danger-light-8);
+      border: 1px solid var(--el-color-danger-light-6);
     }
   }
 
@@ -997,6 +1136,33 @@ defineExpose({
   border: 1px dashed var(--el-border-color);
   border-radius: 8px;
   margin: 16px 0;
+
+  &.is-compact {
+    min-height: auto;
+    padding: 16px 18px;
+    justify-content: space-between;
+    gap: 16px;
+    background: var(--el-fill-color);
+    flex-wrap: wrap;
+  }
+
+  &__compact-copy {
+    min-width: 0;
+  }
+
+  &__title {
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--el-text-color-primary);
+    line-height: 1.4;
+  }
+
+  &__subtitle {
+    margin-top: 4px;
+    font-size: 12px;
+    color: var(--el-text-color-secondary);
+    line-height: 1.5;
+  }
 }
 
 /* 快速选择弹窗 */
@@ -1112,6 +1278,8 @@ defineExpose({
     border: 1px solid var(--el-border-color);
     padding: 4px;
     transition: all 0.3s;
+    height: 110px;
+    vertical-align: top;
 
     &.is-selected {
       background-color: var(--el-color-primary-light-9);
@@ -1121,6 +1289,7 @@ defineExpose({
   .el-calendar-day {
     padding: 0;
     height: 100%;
+    display: block;
   }
 }
 </style>

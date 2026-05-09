@@ -78,24 +78,26 @@
           <el-table-column prop="date" label="日期" width="100" fixed>
             <template #default="{ row }">
               <div class="date-cell">
-                <div
-                  :class="{
-                    date: true,
-                    'is-weekend':
-                      row.weekdayName === '周六' || row.weekdayName === '周日',
-                  }"
-                >
+                <div :class="['date', getDateCellClass(row.date, row.weekdayName)]">
                   {{ formatDate(row.date, "MM-DD") }}
                 </div>
-                <div
-                  class="weekday"
-                  :class="{
-                    'is-weekend':
-                      row.weekdayName === '周六' || row.weekdayName === '周日',
-                  }"
-                >
+                <div :class="['weekday', getDateCellClass(row.date, row.weekdayName)]">
                   {{ row.weekdayName }}
                 </div>
+                <el-tooltip
+                  v-if="getHolidayEntry(row.date)"
+                  :content="`${getHolidayEntry(row.date)?.label}（${getHolidayEntry(row.date)?.typeLabel}）`"
+                  placement="top"
+                  effect="light"
+                >
+                  <div
+                    class="holiday-chip"
+                    :class="getHolidayEntry(row.date)?.type"
+                  >
+                    {{ getHolidayEntry(row.date)?.marker }}
+                    {{ getHolidayEntry(row.date)?.label }}
+                  </div>
+                </el-tooltip>
               </div>
             </template>
           </el-table-column>
@@ -302,10 +304,12 @@ import { repositories } from "@/repositories";
 import { useScheduleViewData } from "@/composables/useScheduleViewData";
 import {
   buildPersonStatistics,
+  holidayService,
   getRestShiftId,
   getScheduleCellKey,
   scheduleService,
 } from "@/services";
+import type { EffectiveHolidayEntry } from "@/services";
 import {
   getAdaptiveTextColor,
   getMonthDates,
@@ -348,6 +352,7 @@ const showScheduleDetail = ref(false);
 const selectedDate = ref("");
 const selectedShiftId = ref("");
 const extraRestDaysForCurrentMonth = ref(0);
+const holidayDateMap = ref<Map<string, EffectiveHolidayEntry>>(new Map());
 
 const dragState = ref<{
   active: boolean;
@@ -423,6 +428,7 @@ const loadData = async () => {
     people.value = peopleData;
     shifts.value = shiftsData;
     schedules.value = schedulesData;
+    await loadHolidayData();
 
     try {
       const [year, monthNum] = currentMonth.value.split("-").map(Number);
@@ -448,6 +454,15 @@ const loadData = async () => {
   }
 };
 
+const loadHolidayData = async () => {
+  if (!currentMonth.value) return;
+  await holidayService.ensureBuiltinHolidays();
+  holidayDateMap.value = await holidayService.getEffectiveMonthDateMap(
+    "CN",
+    currentMonth.value
+  );
+};
+
 /**
  * 计算人员统计信息
  */
@@ -466,6 +481,16 @@ const calculatePersonStatistics = (personId: string, month: string) => {
 const setMonth = async (month: string) => {
   if (!month || month === currentMonth.value) return;
   emit("update:current-month", month);
+};
+
+const getHolidayEntry = (date: string) => holidayDateMap.value.get(date) || null;
+
+const getDateCellClass = (date: string, weekdayName: string) => {
+  const holiday = getHolidayEntry(date);
+  if (holiday?.type === "public_holiday") return "is-holiday";
+  if (holiday?.type === "transfer_workday") return "is-transfer-workday";
+  if (weekdayName === "周六" || weekdayName === "周日") return "is-weekend";
+  return "";
 };
 
 const canDragCell = (date: string, shiftId: string) => {
@@ -1090,14 +1115,51 @@ defineExpose({
     text-align: center;
     align-items: center;
     min-height: 28px;
+    gap: 8px;
+    flex-wrap: wrap;
 
     .weekday {
-      margin-left: 10px;
+      margin-left: 0;
     }
 
     .is-weekend {
       color: var(--el-color-warning);
       font-weight: 600;
+    }
+
+    .is-holiday {
+      color: var(--el-color-primary);
+      font-weight: 700;
+    }
+
+    .is-transfer-workday {
+      color: var(--el-color-danger);
+      font-weight: 700;
+    }
+
+    .holiday-chip {
+      flex: 0 0 100%;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      min-height: 18px;
+      padding: 0 5px;
+      border-radius: 4px;
+      font-size: 11px;
+      line-height: 18px;
+      white-space: nowrap;
+
+      &.public_holiday {
+        color: var(--el-color-primary);
+        background: var(--el-color-primary-light-9);
+        border: 1px solid var(--el-color-primary-light-7);
+      }
+
+      &.transfer_workday {
+        color: var(--el-color-danger);
+        background: var(--el-color-danger-light-9);
+        border: 1px solid var(--el-color-danger-light-7);
+      }
     }
   }
 

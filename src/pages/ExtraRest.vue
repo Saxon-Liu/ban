@@ -4,18 +4,15 @@
       <template #header>
         <div class="card-header">
           <span>额外休息配置</span>
-          <el-select
-            v-model="selectedYear"
-            @change="loadConfigs"
+          <el-date-picker
+            v-model="selectedYearValue"
+            type="year"
+            format="YYYY年"
+            value-format="YYYY"
+            :clearable="false"
+            :editable="false"
             style="width: 120px"
-          >
-            <el-option
-              v-for="year in yearOptions"
-              :key="year"
-              :label="year + '年'"
-              :value="year"
-            />
-          </el-select>
+          />
         </div>
       </template>
 
@@ -55,7 +52,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, reactive } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { ElMessage } from "element-plus";
 import type { ExtraRestConfig } from "@/types";
 import { repositories } from "@/repositories";
@@ -64,12 +61,15 @@ import { repositories } from "@/repositories";
 const configs = ref<ExtraRestConfig[]>([]);
 const loading = ref(false);
 const selectedYear = ref(new Date().getFullYear());
-
-// 年份选项（前后5年）
-const yearOptions = reactive<number[]>([]);
-for (let i = -5; i <= 5; i++) {
-  yearOptions.push(new Date().getFullYear() + i);
-}
+const selectedYearValue = computed({
+  get: () => String(selectedYear.value),
+  set: (value: string | number) => {
+    const nextYear = Number(value);
+    if (!Number.isFinite(nextYear) || nextYear === selectedYear.value) return;
+    selectedYear.value = nextYear;
+    void loadConfigs();
+  },
+});
 
 /**
  * 加载配置数据
