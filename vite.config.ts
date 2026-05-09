@@ -2,12 +2,13 @@ import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
 import { resolve } from "path";
 import electron from "vite-plugin-electron/simple";
+import { HOLIDAY_REMOTE_CONNECT_SOURCES } from "./shared/holidayRemote";
 
 function buildRendererCsp(mode: string, options: { includeFrameAncestors?: boolean } = {}) {
   const { includeFrameAncestors = true } = options;
   const isDevelopment = mode === "development" || mode === "electron";
   const scriptSources = ["'self'"];
-  const connectSources = ["'self'"];
+  const connectSources = ["'self'", ...HOLIDAY_REMOTE_CONNECT_SOURCES];
 
   if (isDevelopment) {
     scriptSources.push("'unsafe-eval'");
