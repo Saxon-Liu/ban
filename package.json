@@ -2,7 +2,7 @@
   "name": "schedule-management",
   "main": "dist-electron/main.js",
   "private": true,
-  "version": "1.2.0",
+  "version": "1.3.0",
   "description": "班次排班管理桌面与 Web 一体化项目",
   "author": "Saxon Liu",
   "scripts": {
