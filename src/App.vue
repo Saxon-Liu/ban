@@ -75,7 +75,7 @@ const THEME_KEY = 'theme-mode'
 const themeMode = ref<'system' | 'light' | 'dark'>('system')
 const ASIDE_WIDTH_KEY = 'aside-width'
 const ASIDE_COLLAPSE_KEY = 'aside-collapsed'
-const asideWidth = ref(200)
+const asideWidth = ref(130)
 const asideCollapsed = ref(true)
 let media: MediaQueryList | null = null
 let mediaChangeHandler: (() => void) | null = null
@@ -106,8 +106,8 @@ onMounted(() => {
     })
   }
   try {
-    const w = Number(localStorage.getItem(ASIDE_WIDTH_KEY) || '200')
-    asideWidth.value = Number.isFinite(w) && w >= 120 && w <= 480 ? w : 200
+    const w = Number(localStorage.getItem(ASIDE_WIDTH_KEY) || '130')
+    asideWidth.value = Number.isFinite(w) && w >= 130 && w <= 320 ? w : 130
     const c = localStorage.getItem(ASIDE_COLLAPSE_KEY)
     // 如果没有存储值，或者存储值不为 'false'，则默认为收起 (true)
     // 即：只有明确存为 'false' 时才展开
@@ -158,7 +158,7 @@ const startAsideResize = (e: MouseEvent) => {
     const onMove = (ev: MouseEvent) => {
       try {
         const delta = ev.clientX - startX
-        const next = Math.min(480, Math.max(120, startWidth + delta))
+        const next = Math.min(320, Math.max(130, startWidth + delta))
         asideWidth.value = next
       } catch (error: any) {
         console.error('[aside-resize-move-error]', {
@@ -219,34 +219,41 @@ body {
   position: relative;
   overflow: hidden;
   transition: width 0.25s ease;
+  border-right: 1px solid var(--el-border-color-light);
+  background:
+    linear-gradient(
+      180deg,
+      var(--el-bg-color) 0%,
+      var(--el-fill-color-blank) 100%
+    );
 }
 
 .el-main {
   background-color: var(--el-bg-color-page);
-  padding: 20px;
+  padding: 16px;
 }
 
 .aside-bottom {
   position: absolute;
-  left: 10px;
-  right: 10px;
-  bottom: 10px;
+  left: 8px;
+  right: 8px;
+  bottom: 8px;
   display: flex;
   align-items: center;
-  gap: 8px;
+  gap: 6px;
 }
 
 .aside-top {
   display: flex;
   align-items: center;
-  padding: 8px;
+  padding: 8px 8px 6px;
 }
 
 .aside-resizer {
   position: absolute;
   top: 0;
   right: 0;
-  width: 6px;
+  width: 4px;
   height: 100%;
   cursor: col-resize;
 }
@@ -267,5 +274,25 @@ body {
 }
 .fade-enter-from, .fade-leave-to {
   opacity: 0;
+}
+
+.app-aside :deep(.el-menu) {
+  border-right: 0;
+  background: transparent;
+}
+
+.app-aside :deep(.el-menu-item) {
+  margin: 4px 8px;
+  height: 42px;
+  line-height: 42px;
+  border-radius: 10px;
+}
+
+.app-aside :deep(.el-menu-item.is-active) {
+  background: var(--el-color-primary-light-9);
+}
+
+.app-aside :deep(.el-select .el-input__wrapper) {
+  box-shadow: 0 0 0 1px var(--el-border-color-light) inset;
 }
 </style>
