@@ -71,8 +71,8 @@
 - 路由：`vue-router`
 - 本地存储：`IndexedDB` + `idb`
 - 拖拽：`vuedraggable`、`sortablejs`
-- 导出：`exceljs`、`xlsx`
-- 桌面端：`Electron 28`
+- 导出：`exceljs`
+- 桌面端：`Electron 39`
 - 打包：`electron-builder`
 
 ## 目录结构
