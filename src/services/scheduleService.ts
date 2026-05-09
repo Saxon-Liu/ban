@@ -260,19 +260,16 @@ export class ScheduleService {
       await assertActiveSchedulingEntities(personId, targetShiftId)
     }
 
-    const db = await dbManager.getDB()
-    const tx = db.transaction('schedules', 'readwrite')
-    const store = tx.store
     const now = getCurrentDateTime()
-
-    const sourceDateSchedules = (await store.index('by-date').getAll(sourceDate)) as Schedule[]
-    const targetDateSchedules = sourceDate === targetDate
-      ? sourceDateSchedules
-      : ((await store.index('by-date').getAll(targetDate)) as Schedule[])
+    const [sourceDateSchedules, targetDateSchedules] = await Promise.all([
+      repositories.schedules.getByDate(sourceDate),
+      sourceDate === targetDate ? Promise.resolve([] as Schedule[]) : repositories.schedules.getByDate(targetDate),
+    ])
+    const effectiveTargetDateSchedules = sourceDate === targetDate ? sourceDateSchedules : targetDateSchedules
 
     const currentSourceSchedules = getSchedulesForCell(sourceDateSchedules, sourceDate, sourceShiftId)
     const targetKey = getScheduleCellKey(targetDate, targetShiftId)
-    const currentTargetSchedules = targetDateSchedules.filter(
+    const currentTargetSchedules = effectiveTargetDateSchedules.filter(
       (schedule) => getScheduleCellKey(schedule.date, schedule.shiftId) === targetKey
     )
 
@@ -289,6 +286,9 @@ export class ScheduleService {
     const updatedSchedules: Schedule[] = []
     const deletedIds: string[] = []
     let conflictCount = 0
+    const pendingAdds: Schedule[] = []
+    const pendingUpdates: Schedule[] = []
+    const pendingDeletes: string[] = []
 
     for (const source of currentSourceSchedules) {
       const existingTargetSchedule = existingByTargetDate.get(source.personId)
@@ -316,7 +316,7 @@ export class ScheduleService {
           order: maxOrder,
           updatedAt: now,
         }
-        store.put(updatedSchedule)
+        pendingUpdates.push(updatedSchedule)
         updatedSchedules.push(updatedSchedule)
         targetPersonIds.add(source.personId)
         existingByTargetDate.set(source.personId, updatedSchedule)
@@ -333,15 +333,31 @@ export class ScheduleService {
         createdAt: now,
         updatedAt: now,
       }
-      store.add(createdSchedule)
+      pendingAdds.push(createdSchedule)
       createdSchedules.push(createdSchedule)
       targetPersonIds.add(source.personId)
       existingByTargetDate.set(source.personId, createdSchedule)
 
       if (mode === 'move') {
-        store.delete(source.id)
+        pendingDeletes.push(source.id)
         deletedIds.push(source.id)
       }
+    }
+
+    const db = await dbManager.getDB()
+    const tx = db.transaction('schedules', 'readwrite')
+    const store = tx.store
+
+    for (const schedule of pendingUpdates) {
+      store.put(schedule)
+    }
+
+    for (const schedule of pendingAdds) {
+      store.add(schedule)
+    }
+
+    for (const scheduleId of pendingDeletes) {
+      store.delete(scheduleId)
     }
 
     await tx.done
