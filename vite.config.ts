@@ -1,8 +1,53 @@
 import { defineConfig } from "vite";
 import vue from "@vitejs/plugin-vue";
 import { resolve } from "path";
+import { spawnSync } from "child_process";
 import electron from "vite-plugin-electron/simple";
 import { HOLIDAY_REMOTE_CONNECT_SOURCES } from "./shared/holidayRemote";
+
+type ElectronStartup = ((argv?: string[], options?: Record<string, unknown>) => Promise<void>) & {
+  exit?: () => Promise<void>;
+  __codexExitPatched?: boolean;
+};
+
+function patchElectronStartupExit(startup: ElectronStartup) {
+  if (process.platform !== "win32" || startup.__codexExitPatched) {
+    return;
+  }
+
+  startup.exit = async () => {
+    const electronApp = process.electronApp;
+    if (!electronApp?.pid) {
+      return;
+    }
+
+    await new Promise<void>((resolve) => {
+      let settled = false;
+      const finish = () => {
+        if (settled) return;
+        settled = true;
+        resolve();
+      };
+
+      electronApp.removeAllListeners();
+      electronApp.once("exit", finish);
+
+      const result = spawnSync("taskkill", ["/pid", String(electronApp.pid), "/T", "/F"], {
+        stdio: "ignore",
+        windowsHide: true,
+      });
+
+      if (result.error || result.status !== 0) {
+        finish();
+        return;
+      }
+
+      setTimeout(finish, 2000);
+    });
+  };
+
+  startup.__codexExitPatched = true;
+}
 
 function buildRendererCsp(mode: string, options: { includeFrameAncestors?: boolean } = {}) {
   const { includeFrameAncestors = true } = options;
@@ -47,8 +92,25 @@ export default defineConfig(async ({ mode }) => {
       main: {
         entry: "electron/main.ts",
         async onstart({ startup }) {
+          patchElectronStartupExit(startup as ElectronStartup);
           delete process.env.ELECTRON_RUN_AS_NODE;
-          await startup([".", "--no-sandbox"]);
+          await startup(["."], {
+            stdio: ["inherit", "pipe", "pipe", "ipc"],
+          });
+
+          const electronApp = process.electronApp;
+          if (electronApp?.stdout) {
+            electronApp.stdout.setEncoding("utf8");
+            electronApp.stdout.on("data", (chunk: string) => {
+              process.stdout.write(chunk);
+            });
+          }
+          if (electronApp?.stderr) {
+            electronApp.stderr.setEncoding("utf8");
+            electronApp.stderr.on("data", (chunk: string) => {
+              process.stderr.write(chunk);
+            });
+          }
         },
         vite: {
           build: {
