@@ -65,6 +65,9 @@ export function useAutoLogout() {
     closingForActivity = true
     warningVisible = false
     ElMessageBox.close()
+    setTimeout(() => {
+      closingForActivity = false
+    }, 100)
   }
 
   const logout = async (message?: string) => {
@@ -141,10 +144,7 @@ export function useAutoLogout() {
 
   const handleActivity = () => {
     if (!isAutoLogoutActive()) return
-
-    if (warningVisible) {
-      closeWarning()
-    }
+    if (warningVisible) return
     refreshAuthSessionExpiry()
     resetTimers()
   }

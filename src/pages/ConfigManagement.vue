@@ -95,6 +95,7 @@
             type="password"
             show-password
             placeholder="请输入当前密码"
+            @keyup.enter="handleChangePassword"
           />
         </el-form-item>
         <el-form-item label="新密码" prop="newPassword">
@@ -103,6 +104,7 @@
             type="password"
             show-password
             placeholder="请输入新密码"
+            @keyup.enter="handleChangePassword"
           />
         </el-form-item>
         <el-form-item label="确认新密码" prop="confirmPassword">
@@ -111,6 +113,7 @@
             type="password"
             show-password
             placeholder="请再次输入新密码"
+            @keyup.enter="handleChangePassword"
           />
         </el-form-item>
       </el-form>
