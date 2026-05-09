@@ -18,7 +18,6 @@
             size="large"
             show-password
             :prefix-icon="Lock"
-            @keyup.enter="handleLogin"
           />
         </el-form-item>
         <el-form-item>
@@ -98,7 +97,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive } from 'vue'
+import { ref, reactive, computed, onBeforeUnmount } from 'vue'
 import { Lock } from '@element-plus/icons-vue'
 import { useRouter, useRoute } from 'vue-router'
 import { ElMessage, type FormInstance, type FormRules } from 'element-plus'
@@ -153,6 +152,11 @@ const resetRules: FormRules = {
 
 const handleResetPassword = async () => {
   if (!resetFormRef.value) return
+  if (isResetInCooldown.value) {
+    ElMessage.warning(resetCooldownRemainingText.value)
+    return
+  }
+
   try {
     await resetFormRef.value.validate()
   } catch {
@@ -160,9 +164,25 @@ const handleResetPassword = async () => {
   }
 
   if (!(await verifyResetCode(resetForm.resetCode))) {
-    ElMessage.error('恢复码不正确')
+    const state = syncResetFailState()
+    state.count += 1
+    if (state.count >= 5) {
+      state.cooldownUntil = Date.now() + 30 * 1000
+      resetFailState.value = state
+      writeScopedFailState(RESET_FAIL_STORAGE_KEY, state)
+      resetCooldownRemaining.value = 30
+      startResetCooldownTick()
+      ElMessage.error('连续 5 次恢复码错误，请等待 30 秒后重试')
+    } else {
+      writeScopedFailState(RESET_FAIL_STORAGE_KEY, state)
+      ElMessage.error(`恢复码错误，还剩余 ${5 - state.count} 次尝试机会`)
+    }
+    resetForm.resetCode = ''
     return
   }
+
+  clearScopedFailState(RESET_FAIL_STORAGE_KEY)
+  syncResetFailState()
 
   if (resetMode.value === 'default') {
     clearCustomSecret()
@@ -173,6 +193,7 @@ const handleResetPassword = async () => {
   }
 
   invalidateAuthSessions()
+  clearFailState()
 
   showResetDialog.value = false
   resetForm.resetCode = ''
@@ -181,9 +202,150 @@ const handleResetPassword = async () => {
   form.secretKey = ''
 }
 
+onBeforeUnmount(() => {
+  stopCooldownTick()
+  stopResetCooldownTick()
+})
+
 const form = reactive({
   secretKey: ''
 })
+
+const LOGIN_FAIL_STORAGE_KEY = 'login-fail-state'
+const RESET_FAIL_STORAGE_KEY = 'reset-fail-state'
+
+interface LoginFailState {
+  count: number
+  cooldownUntil: number
+}
+
+const readScopedFailState = (storageKey: string): LoginFailState => {
+  try {
+    const raw = localStorage.getItem(storageKey)
+    if (!raw) return { count: 0, cooldownUntil: 0 }
+    return JSON.parse(raw) as LoginFailState
+  } catch {
+    return { count: 0, cooldownUntil: 0 }
+  }
+}
+
+const readFailState = () => readScopedFailState(LOGIN_FAIL_STORAGE_KEY)
+
+const writeScopedFailState = (storageKey: string, state: LoginFailState) => {
+  localStorage.setItem(storageKey, JSON.stringify(state))
+}
+
+const writeFailState = (state: LoginFailState) => {
+  writeScopedFailState(LOGIN_FAIL_STORAGE_KEY, state)
+}
+
+const clearScopedFailState = (storageKey: string) => {
+  localStorage.removeItem(storageKey)
+}
+
+const clearFailState = () => {
+  clearScopedFailState(LOGIN_FAIL_STORAGE_KEY)
+}
+
+const failState = ref(readFailState())
+const resetFailState = ref(readScopedFailState(RESET_FAIL_STORAGE_KEY))
+
+const cooldownRemaining = ref(0)
+const resetCooldownRemaining = ref(0)
+let cooldownTimer: ReturnType<typeof setInterval> | null = null
+let resetCooldownTimer: ReturnType<typeof setInterval> | null = null
+
+const normalizeFailState = (state: LoginFailState, storageKey: string): LoginFailState => {
+  if (state.cooldownUntil > 0 && state.cooldownUntil <= Date.now()) {
+    clearScopedFailState(storageKey)
+    return { count: 0, cooldownUntil: 0 }
+  }
+  return state
+}
+
+const syncFailState = () => {
+  const state = normalizeFailState(readFailState(), LOGIN_FAIL_STORAGE_KEY)
+  failState.value = state
+
+  if (state.cooldownUntil > Date.now()) {
+    cooldownRemaining.value = Math.max(0, Math.ceil((state.cooldownUntil - Date.now()) / 1000))
+    startCooldownTick()
+    return state
+  }
+
+  cooldownRemaining.value = 0
+  stopCooldownTick()
+  return state
+}
+
+const syncResetFailState = () => {
+  const state = normalizeFailState(readScopedFailState(RESET_FAIL_STORAGE_KEY), RESET_FAIL_STORAGE_KEY)
+  resetFailState.value = state
+
+  if (state.cooldownUntil > Date.now()) {
+    resetCooldownRemaining.value = Math.max(0, Math.ceil((state.cooldownUntil - Date.now()) / 1000))
+    startResetCooldownTick()
+    return state
+  }
+
+  resetCooldownRemaining.value = 0
+  stopResetCooldownTick()
+  return state
+}
+
+const startCooldownTick = () => {
+  stopCooldownTick()
+  cooldownTimer = setInterval(() => {
+    const remaining = Math.max(0, Math.ceil((failState.value.cooldownUntil - Date.now()) / 1000))
+    cooldownRemaining.value = remaining
+    if (remaining <= 0) {
+      stopCooldownTick()
+      syncFailState()
+    }
+  }, 1000)
+}
+
+const stopCooldownTick = () => {
+  if (cooldownTimer) {
+    clearInterval(cooldownTimer)
+    cooldownTimer = null
+  }
+}
+
+const startResetCooldownTick = () => {
+  stopResetCooldownTick()
+  resetCooldownTimer = setInterval(() => {
+    const remaining = Math.max(0, Math.ceil((resetFailState.value.cooldownUntil - Date.now()) / 1000))
+    resetCooldownRemaining.value = remaining
+    if (remaining <= 0) {
+      stopResetCooldownTick()
+      syncResetFailState()
+    }
+  }, 1000)
+}
+
+const stopResetCooldownTick = () => {
+  if (resetCooldownTimer) {
+    clearInterval(resetCooldownTimer)
+    resetCooldownTimer = null
+  }
+}
+
+const isInCooldown = computed(() => failState.value.cooldownUntil > Date.now())
+const isResetInCooldown = computed(() => resetFailState.value.cooldownUntil > Date.now())
+
+const cooldownRemainingText = computed(() => {
+  if (!isInCooldown.value) return ''
+  return `请等待 ${cooldownRemaining.value} 秒后重试`
+})
+
+const resetCooldownRemainingText = computed(() => {
+  if (!isResetInCooldown.value) return ''
+  return `请等待 ${resetCooldownRemaining.value} 秒后重试恢复码`
+})
+
+syncFailState()
+syncResetFailState()
 
 const createAuthToken = () => {
   if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
@@ -201,6 +363,11 @@ const rules: FormRules = {
 const handleLogin = async () => {
   if (!formRef.value || loading.value) return
 
+  if (isInCooldown.value) {
+    ElMessage.warning(cooldownRemainingText.value)
+    return
+  }
+
   loading.value = true
 
   try {
@@ -212,11 +379,25 @@ const handleLogin = async () => {
 
   try {
     if (!(await verifyLoginSecret(form.secretKey))) {
-      ElMessage.error('密钥错误，请重试')
+      const state = syncFailState()
+      state.count += 1
+      if (state.count >= 5) {
+        state.cooldownUntil = Date.now() + 30 * 1000
+        failState.value = state
+        writeFailState(state)
+        cooldownRemaining.value = 30
+        startCooldownTick()
+        ElMessage.error('连续 5 次密码错误，请等待 30 秒后重试')
+      } else {
+        writeFailState(state)
+        ElMessage.error(`密钥错误，还剩余 ${5 - state.count} 次尝试机会`)
+      }
       form.secretKey = ''
       return
     }
 
+    clearFailState()
+    syncFailState()
     startAuthSession(createAuthToken())
     ElMessage.success('登录成功')
 
