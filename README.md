@@ -199,9 +199,9 @@ release/<version>/
 
 例如当前版本可能输出：
 
-- `班-1.2.0-便携版.exe`
-- `班-1.2.0-安装版.exe`
-- `班-1.2.0-绿色版.zip`
+- `schedule-management-1.2.0-portable.exe`
+- `schedule-management-1.2.0-setup.exe`
+- `schedule-management-1.2.0-green.zip`
 
 说明：
 
