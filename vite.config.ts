@@ -98,7 +98,7 @@ export default defineConfig(async ({ mode }) => {
           manualChunks: {
             "vendor-vue": ["vue", "vue-router"],
             "vendor-element-plus": ["element-plus", "@element-plus/icons-vue"],
-            "vendor-excel": ["exceljs", "xlsx"],
+            "vendor-excel": ["exceljs"],
             "vendor-utils": ["lodash-es", "dayjs"],
           },
         },
