@@ -211,7 +211,13 @@ export class HolidayService {
   }
 
   async syncYearFromRemote(year: number): Promise<{ year: number; count: number; url: string }> {
+    if (!Number.isInteger(year) || year < 2000) {
+      throw new Error('节假日年份无效')
+    }
+
     const failures: string[] = []
+    let notFoundCount = 0
+    let networkLikeFailureCount = 0
 
     for (const template of HOLIDAY_REMOTE_SOURCE_TEMPLATES) {
       const url = buildHolidayRemoteSourceUrl(template, year)
@@ -239,12 +245,30 @@ export class HolidayService {
 
         return { year, count: payload.dates.length, url }
       } catch (error) {
-        failures.push(`${url}: ${error instanceof Error ? error.message : '未知错误'}`)
+        const message = error instanceof Error ? error.message : '未知错误'
+        if (message === 'HTTP 404') {
+          notFoundCount += 1
+        } else if (
+          message === 'Failed to fetch' ||
+          message === 'NetworkError when attempting to fetch resource.' ||
+          message === 'Load failed' ||
+          error instanceof DOMException
+        ) {
+          networkLikeFailureCount += 1
+        }
+        failures.push(`${url}: ${message}`)
       }
     }
 
-    const message =
+    let message =
       '无法连接节假日数据源。当前可能离线，或远程地址不可访问。请稍后重试，或手动导入 holiday-calendar 格式的 JSON 文件。'
+    if (notFoundCount === HOLIDAY_REMOTE_SOURCE_TEMPLATES.length) {
+      message = `未找到 ${year} 年节假日数据，远程数据源暂未提供该年份文件。`
+    } else if (networkLikeFailureCount > 0) {
+      message =
+        '节假日数据源当前不可访问或请求被浏览器拦截。请检查网络连接与远程地址可达性，或稍后重试。'
+    }
+
     await repositories.holidayCalendar.upsertSyncState({
       region: REGION,
       year,

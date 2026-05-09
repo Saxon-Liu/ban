@@ -410,7 +410,7 @@ const holidaySyncYearValue = computed({
   set: (value: string | number) => {
     const nextYear = Number(value);
     if (Number.isFinite(nextYear)) {
-      holidaySyncYear.value = nextYear;
+      holidaySyncYear.value = Math.trunc(nextYear);
     }
   },
 });
@@ -609,12 +609,10 @@ const handleReinitialize = async () => {
     if (reinitializeResetPassword.value) {
       clearCustomSecret();
       invalidateAuthSessions();
-      ElMessage.success(
-        "系统已重新初始化，登录密码已重置为默认值，页面即将刷新",
-      );
+      ElMessage.success("系统已重新初始化，登录密码已重置为默认值");
     } else {
       invalidateAuthSessions();
-      ElMessage.success("系统已重新初始化，页面即将刷新");
+      ElMessage.success("系统已重新初始化");
     }
     setTimeout(() => window.location.reload(), 1200);
   } catch (error) {
@@ -739,7 +737,7 @@ const handleFileChange = async (event: Event) => {
       importArchivedPeople: importArchivedPeople.value,
       replaceAllBeforeImport: replaceAllBeforeImport.value,
     });
-    ElMessage.success("配置导入成功，请刷新页面查看最新数据");
+    ElMessage.success("配置导入成功");
 
     setTimeout(() => {
       window.location.reload();
