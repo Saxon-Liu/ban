@@ -13,13 +13,14 @@
     "lint:fix": "eslint . --ext .ts,.js,.vue --fix",
     "type-check": "vue-tsc --noEmit",
     "type-check:electron": "tsc -p tsconfig.electron.json --noEmit",
+    "clean:release": "node -e \"const fs=require('fs'); const path=require('path'); const pkg=require('./package.json'); const target=path.join(process.cwd(),'release',pkg.version); fs.rmSync(target,{recursive:true,force:true}); console.log('cleaned', target);\"",
     "build:desktop": "npm run type-check && npm run type-check:electron && vite build --mode electron",
-    "build:portable": "npm run build:desktop && electron-builder --config electron-builder.yml --win portable",
-    "build:setup": "npm run build:desktop && electron-builder --config electron-builder.yml --win nsis",
-    "build:green": "npm run build:desktop && electron-builder --config electron-builder.yml --win zip",
-    "build:all": "npm run build:desktop && electron-builder --config electron-builder.yml --win portable nsis zip",
+    "build:portable": "npm run clean:release && npm run build:desktop && electron-builder --config electron-builder.yml --win portable --publish never",
+    "build:setup": "npm run clean:release && npm run build:desktop && electron-builder --config electron-builder.yml --win nsis --publish never",
+    "build:green": "npm run clean:release && npm run build:desktop && electron-builder --config electron-builder.yml --win zip --publish never",
+    "build:all": "npm run clean:release && npm run build:desktop && electron-builder --config electron-builder.yml --win portable nsis zip --publish never",
     "preview": "vite preview",
-    "pack:dir": "npm run build:desktop && electron-builder --config electron-builder.yml --dir"
+    "pack:dir": "npm run clean:release && npm run build:desktop && electron-builder --config electron-builder.yml --dir --publish never"
   },
   "dependencies": {
     "@element-plus/icons-vue": "^2.3.1",

@@ -173,6 +173,8 @@ npm run build:all
 - `build:all`：一次生成全部桌面产物
 - `pack:dir`：仅生成 `win-unpacked` 目录，便于调试桌面构建结果
 
+这些命令在执行前会自动清理当前版本对应的 `release/<version>/` 目录，避免同版本重复打包时残留旧产物或中间文件。
+
 ### 发布到 GitHub Release
 
 仓库已支持通过 GitHub Actions 自动发布桌面安装包。
@@ -199,9 +201,9 @@ release/<version>/
 
 例如当前版本可能输出：
 
-- `schedule-management-1.2.0-portable.exe`
-- `schedule-management-1.2.0-setup.exe`
-- `schedule-management-1.2.0-green.zip`
+- `ban-1.2.0-portable.exe`
+- `ban-1.2.0-setup.exe`
+- `ban-1.2.0-green.zip`
 
 说明：
 
