@@ -132,8 +132,11 @@ import { dbManager } from "@/repositories/IndexedDBManager";
 import { initializeDefaultShifts } from "@/services/initialization";
 import {
   assertImportPayload,
+  checkImportFileSize,
   exportConfiguration,
+  ImportValidationError,
   importConfiguration,
+  validateImportData,
 } from "@/services";
 import {
   clearCustomSecret,
@@ -360,9 +363,12 @@ const handleFileChange = async (event: Event) => {
   if (!file) return;
 
   try {
+    checkImportFileSize(file)
+
     const text = await file.text();
     const configData = JSON.parse(text) as unknown;
     assertImportPayload(configData)
+    validateImportData(configData.data)
 
     await ElMessageBox.confirm(
       replaceAllBeforeImport.value
@@ -385,8 +391,7 @@ const handleFileChange = async (event: Event) => {
       replaceAllBeforeImport: replaceAllBeforeImport.value,
     });
     ElMessage.success("配置导入成功，请刷新页面查看最新数据");
-    
-    // 稍微延迟后刷新页面以确保所有状态更新
+
     setTimeout(() => {
       window.location.reload();
     }, 1500);
@@ -394,7 +399,9 @@ const handleFileChange = async (event: Event) => {
   } catch (error: unknown) {
     if (error !== "cancel") {
       console.error("导入配置失败:", error);
-      const errorMsg = error instanceof Error ? error.message : "未知错误";
+      const errorMsg = error instanceof ImportValidationError
+        ? `数据校验失败:\n${error.message}`
+        : error instanceof Error ? error.message : "未知错误";
       ElMessage.error({
         message: `导入配置失败: ${errorMsg}`,
         duration: 5000,

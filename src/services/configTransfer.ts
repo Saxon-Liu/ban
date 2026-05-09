@@ -155,7 +155,147 @@ export function assertImportPayload(payload: unknown): asserts payload is { data
   }
 }
 
+const COLOR_REGEX = /^#[0-9A-Fa-f]{6}$/
+const DATE_REGEX = /^\d{4}-\d{2}-\d{2}$/
+const MONTH_REGEX = /^\d{4}-\d{2}$/
+const MAX_FILE_SIZE = 10 * 1024 * 1024
+
+export interface ValidationError {
+  category: string
+  index: number
+  field: string
+  message: string
+}
+
+export class ImportValidationError extends Error {
+  errors: ValidationError[]
+
+  constructor(errors: ValidationError[]) {
+    const message = errors.length <= 5
+      ? errors.map(e => `${e.category}[${e.index}] ${e.field}: ${e.message}`).join('\n')
+      : errors.slice(0, 5).map(e => `${e.category}[${e.index}] ${e.field}: ${e.message}`).join('\n')
+        + `\n... 及其他 ${errors.length - 5} 条错误`
+    super(message)
+    this.name = 'ImportValidationError'
+    this.errors = errors
+  }
+}
+
+export function validateImportData(data: ImportedConfigData): void {
+  const errors: ValidationError[] = []
+
+  const seenPersonIds = new Set<string>()
+  const seenShiftIds = new Set<string>()
+
+  for (let i = 0; i < data.people.length; i++) {
+    const p = data.people[i]
+    if (!p.id || typeof p.id !== 'string') {
+      errors.push({ category: '人员', index: i + 1, field: 'id', message: 'id 不能为空' })
+    } else {
+      if (seenPersonIds.has(p.id)) {
+        errors.push({ category: '人员', index: i + 1, field: 'id', message: `id "${p.id}" 重复` })
+      }
+      seenPersonIds.add(p.id)
+    }
+    if (!p.name || typeof p.name !== 'string' || p.name.trim().length === 0) {
+      errors.push({ category: '人员', index: i + 1, field: 'name', message: '姓名不能为空' })
+    } else if (p.name.length > 20) {
+      errors.push({ category: '人员', index: i + 1, field: 'name', message: `姓名长度不能超过20个字符（当前${p.name.length}个）` })
+    }
+    if (p.color && !COLOR_REGEX.test(p.color)) {
+      errors.push({ category: '人员', index: i + 1, field: 'color', message: `颜色格式无效:"${p.color}"（应为 #RRGGBB）` })
+    }
+    if (p.baseRestDays !== undefined && p.baseRestDays !== null) {
+      if (typeof p.baseRestDays !== 'number' || !Number.isInteger(p.baseRestDays) || p.baseRestDays < 0 || p.baseRestDays > 31) {
+        errors.push({ category: '人员', index: i + 1, field: 'baseRestDays', message: `基础休息天数必须为 0-31 的整数（当前${p.baseRestDays}）` })
+      }
+    }
+    if (p.order !== undefined && p.order !== null && typeof p.order !== 'number') {
+      errors.push({ category: '人员', index: i + 1, field: 'order', message: `排序值必须为数字（当前${typeof p.order}）` })
+    }
+  }
+
+  for (let i = 0; i < data.shifts.length; i++) {
+    const s = data.shifts[i]
+    if (!s.id || typeof s.id !== 'string') {
+      errors.push({ category: '班次', index: i + 1, field: 'id', message: 'id 不能为空' })
+    } else {
+      if (seenShiftIds.has(s.id)) {
+        errors.push({ category: '班次', index: i + 1, field: 'id', message: `id "${s.id}" 重复` })
+      }
+      seenShiftIds.add(s.id)
+    }
+    if (!s.name || typeof s.name !== 'string' || s.name.trim().length === 0) {
+      errors.push({ category: '班次', index: i + 1, field: 'name', message: '名称不能为空' })
+    } else if (s.name.length > 20) {
+      errors.push({ category: '班次', index: i + 1, field: 'name', message: `名称长度不能超过20个字符（当前${s.name.length}个）` })
+    }
+    if (s.color && !COLOR_REGEX.test(s.color)) {
+      errors.push({ category: '班次', index: i + 1, field: 'color', message: `颜色格式无效:"${s.color}"（应为 #RRGGBB）` })
+    }
+    if (s.isRest !== undefined && s.isRest !== null && typeof s.isRest !== 'boolean') {
+      errors.push({ category: '班次', index: i + 1, field: 'isRest', message: `isRest 必须为布尔类型（当前${typeof s.isRest}）` })
+    }
+    if (s.order !== undefined && s.order !== null && typeof s.order !== 'number') {
+      errors.push({ category: '班次', index: i + 1, field: 'order', message: `排序值必须为数字（当前${typeof s.order}）` })
+    }
+  }
+
+  for (let i = 0; i < (data.extraRestConfigs || []).length; i++) {
+    const c = (data.extraRestConfigs || [])[i]
+    if (typeof c.year !== 'number' || !Number.isInteger(c.year) || c.year < 2000) {
+      errors.push({ category: '额外休息配置', index: i + 1, field: 'year', message: `年份无效（当前${c.year}，需 ≥ 2000）` })
+    }
+    if (typeof c.month !== 'number' || !Number.isInteger(c.month) || c.month < 1 || c.month > 12) {
+      errors.push({ category: '额外休息配置', index: i + 1, field: 'month', message: `月份无效（当前${c.month}，需 1-12）` })
+    }
+    if (c.extraRestDays !== undefined && c.extraRestDays !== null) {
+      if (typeof c.extraRestDays !== 'number' || !Number.isInteger(c.extraRestDays) || c.extraRestDays < 0 || c.extraRestDays > 31) {
+        errors.push({ category: '额外休息配置', index: i + 1, field: 'extraRestDays', message: `额外休息天数必须为 0-31 整数（当前${c.extraRestDays}）` })
+      }
+    }
+  }
+
+  for (let i = 0; i < (data.schedules || []).length; i++) {
+    const sc = (data.schedules || [])[i]
+    if (!sc.personId || typeof sc.personId !== 'string') {
+      errors.push({ category: '排班', index: i + 1, field: 'personId', message: 'personId 不能为空' })
+    }
+    if (!sc.shiftId || typeof sc.shiftId !== 'string') {
+      errors.push({ category: '排班', index: i + 1, field: 'shiftId', message: 'shiftId 不能为空' })
+    }
+    if (!sc.date || typeof sc.date !== 'string' || !DATE_REGEX.test(sc.date)) {
+      errors.push({ category: '排班', index: i + 1, field: 'date', message: `日期格式无效:"${sc.date}"（应为 YYYY-MM-DD）` })
+    }
+    if (sc.month && !MONTH_REGEX.test(sc.month)) {
+      errors.push({ category: '排班', index: i + 1, field: 'month', message: `月份格式无效:"${sc.month}"（应为 YYYY-MM）` })
+    }
+    if (sc.order !== undefined && sc.order !== null && typeof sc.order !== 'number') {
+      errors.push({ category: '排班', index: i + 1, field: 'order', message: `排序值必须为数字（当前${typeof sc.order}）` })
+    }
+    if (sc.personId && typeof sc.personId === 'string' && !seenPersonIds.has(sc.personId)) {
+      errors.push({ category: '排班', index: i + 1, field: 'personId', message: `引用了不存在的人员 id "${sc.personId}"` })
+    }
+    if (sc.shiftId && typeof sc.shiftId === 'string' && !seenShiftIds.has(sc.shiftId)) {
+      errors.push({ category: '排班', index: i + 1, field: 'shiftId', message: `引用了不存在的班次 id "${sc.shiftId}"` })
+    }
+  }
+
+  if (errors.length > 0) {
+    throw new ImportValidationError(errors)
+  }
+}
+
+export function checkImportFileSize(file: File): void {
+  if (file.size > MAX_FILE_SIZE) {
+    const sizeMB = (file.size / (1024 * 1024)).toFixed(1)
+    throw new Error(`文件过大（${sizeMB}MB），导入文件不能超过 10MB`)
+  }
+}
+
 export async function importConfiguration(data: ImportedConfigData, options: ImportOptions): Promise<void> {
+  validateImportData(data)
+
   const now = getCurrentDateTime()
   const db = await dbManager.getDB()
 
