@@ -26,6 +26,9 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Update builtin holidays
+        run: npm run holidays:update:strict
+
       - name: Build release packages
         run: npm run build:all
 
