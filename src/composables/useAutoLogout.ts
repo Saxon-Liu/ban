@@ -44,6 +44,7 @@ export function useAutoLogout() {
   let forceLogoutTimer: ReturnType<typeof setTimeout> | null = null
   let warningVisible = false
   let closingForActivity = false
+  let warningToken = 0
 
   const isPublicRoute = () => route.path === '/login' || route.matched.some(record => record.meta.public)
 
@@ -64,6 +65,7 @@ export function useAutoLogout() {
     if (!warningVisible) return
     closingForActivity = true
     warningVisible = false
+    warningToken += 1
     ElMessageBox.close()
     setTimeout(() => {
       closingForActivity = false
@@ -101,7 +103,8 @@ export function useAutoLogout() {
     }
 
     warningVisible = false
-    void logout('长时间未操作，已自动退出登录')
+    refreshAuthSessionExpiry()
+    resetTimers()
   }
 
   const showWarning = async () => {
@@ -109,8 +112,12 @@ export function useAutoLogout() {
     const config = getAutoLogoutConfig()
     if (!config.enabled) return
 
+    const currentToken = ++warningToken
     warningVisible = true
     forceLogoutTimer = setTimeout(() => {
+      if (currentToken !== warningToken) {
+        return
+      }
       if (!isAutoLogoutActive()) {
         warningVisible = false
         clearTimers()
@@ -131,13 +138,26 @@ export function useAutoLogout() {
           cancelButtonText: '退出登录',
           closeOnClickModal: false,
           closeOnPressEscape: false,
+          distinguishCancelAndClose: true,
           type: 'warning',
         }
       )
 
+      if (currentToken !== warningToken) {
+        return
+      }
       warningVisible = false
+      refreshAuthSessionExpiry()
       resetTimers()
-    } catch {
+    } catch (action) {
+      if (currentToken !== warningToken) {
+        return
+      }
+      if (action === 'cancel') {
+        warningVisible = false
+        void logout('长时间未操作，已退出登录')
+        return
+      }
       handleWarningClosed()
     }
   }
