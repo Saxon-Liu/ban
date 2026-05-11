@@ -109,6 +109,7 @@ export class IndexedDBShiftRepository implements ShiftRepository {
       return true
     }
 
+    // 班次删除采用软删除，历史排班仍可通过已删除班次信息展示。
     await this.update(id, {
       archivedAt: getCurrentDateTime(),
     })
@@ -166,6 +167,7 @@ export class IndexedDBShiftRepository implements ShiftRepository {
   async isNameExists(name: string, excludeId?: string): Promise<boolean> {
     const db = await dbManager.getDB()
     const shifts = await db.getAllFromIndex('shifts', 'by-name', name)
+    // 同名限制只针对未删除班次，已删除历史班次不影响重新新增同名班次。
     const activeShifts = shifts.filter((shift: Shift) => !shift.archivedAt)
     
     if (excludeId) {
@@ -238,6 +240,7 @@ export class IndexedDBShiftRepository implements ShiftRepository {
     const shifts = await Promise.all(ids.map((id) => this.getById(id)))
     const db = await dbManager.getDB()
 
+    // 先完整校验，避免批量删除执行到一半才发现存在不可删除的休息班次。
     for (const shift of shifts) {
       if (!shift) {
         throw new Error('班次不存在')

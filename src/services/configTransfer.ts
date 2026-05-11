@@ -5,15 +5,19 @@ import { DEFAULT_SHIFTS } from '@/utils'
 import { getCurrentDateTime } from '@/utils/common'
 
 interface ImportOptions {
+  /** 是否导入已删除人员；关闭时仅保留为修复历史排班生成的占位人员 */
   importArchivedPeople: boolean
+  /** 导入前是否清空当前 IndexedDB 业务数据 */
   replaceAllBeforeImport: boolean
 }
 
+/** JSON 备份中的排班记录，Date 字段会被序列化为 ISO 字符串 */
 export interface SerializedScheduleRecord extends Omit<Schedule, 'createdAt' | 'updatedAt'> {
   createdAt: string
   updatedAt: string
 }
 
+/** 配置导出的业务数据主体 */
 export interface ExportConfigData {
   people: Person[]
   shifts: Shift[]
@@ -21,6 +25,7 @@ export interface ExportConfigData {
   schedules?: SerializedScheduleRecord[]
 }
 
+/** 配置导出文件的顶层结构 */
 export interface ExportConfigPayload {
   version: string
   timestamp: string
@@ -30,12 +35,14 @@ export interface ExportConfigPayload {
 interface ImportedPersonRecord extends Partial<Person> {
   id: string
   name: string
+  /** 旧备份排班引用缺失人员时自动生成，确保历史排班可恢复 */
   __generatedPlaceholder?: boolean
 }
 
 interface ImportedShiftRecord extends Partial<Shift> {
   id: string
   name: string
+  /** 旧备份排班引用缺失班次时自动生成，确保历史排班可恢复 */
   __generatedPlaceholder?: boolean
 }
 
@@ -59,6 +66,7 @@ export interface ImportedConfigData {
   schedules?: ImportedScheduleRecord[]
 }
 
+/** 导入预处理结果，repairs 用于向用户提示自动兼容了哪些旧数据 */
 export interface ImportPreparationResult {
   data: ImportedConfigData
   repairs: string[]
@@ -109,6 +117,7 @@ export function prepareImportData(data: ImportedConfigData): ImportPreparationRe
   const normalizedSchedules = [...(data.schedules || [])]
   const repairs: string[] = []
 
+  // 旧版本可能只导出了排班，没有导出已删除人员/班次；这里先收集现有引用。
   const personIds = new Set(
     normalizedPeople
       .map((person) => person.id)
@@ -123,6 +132,7 @@ export function prepareImportData(data: ImportedConfigData): ImportPreparationRe
   const missingPersonIds: string[] = []
   const missingShiftIds: string[] = []
 
+  // 对缺失引用生成“已删除占位数据”，避免历史排班在校验阶段被误判为损坏。
   for (const schedule of normalizedSchedules) {
     if (
       schedule.personId &&
@@ -168,6 +178,7 @@ export function prepareImportData(data: ImportedConfigData): ImportPreparationRe
   }
 }
 
+/** 将导入文件中的时间字段恢复为 Date，异常值使用当前时间兜底 */
 function parseTimestamp(value: unknown): Date {
   if (value instanceof Date) return value
   if (typeof value === 'string' || typeof value === 'number') {
@@ -179,10 +190,12 @@ function parseTimestamp(value: unknown): Date {
   return getCurrentDateTime()
 }
 
+/** 同一人员同一天排班的去重键 */
 function getScheduleSlotKey(personId: string, date: string) {
   return `${personId}::${date}`
 }
 
+/** 规范化导入班次，并返回旧班次 ID 到实际写入班次 ID 的映射 */
 export function normalizeImportedShifts(shifts: ImportedShiftRecord[] = []) {
   const defaultRestShift = DEFAULT_SHIFTS.find((shift) => shift.isRest)
   const dedupMap = new Map<string, Shift>()
@@ -200,6 +213,7 @@ export function normalizeImportedShifts(shifts: ImportedShiftRecord[] = []) {
       updatedAt: parseTimestamp(shift.updatedAt),
     }
 
+    // 休息班次在系统内应使用默认休息班次 ID，避免导入后出现多个“休息”概念。
     if (shift.isRest && defaultRestShift) {
       shiftIdMap.set(shift.id, defaultRestShift.id)
       normalized.id = defaultRestShift.id
@@ -220,6 +234,7 @@ export function normalizeImportedShifts(shifts: ImportedShiftRecord[] = []) {
   }
 }
 
+/** 导出当前配置；可选导出排班和已删除人员相关历史数据 */
 export async function exportConfiguration(
   includeSchedules: boolean,
   includeDeletedPeople = false
@@ -237,6 +252,7 @@ export async function exportConfiguration(
   const { shifts: normalizedShifts } = normalizeImportedShifts(shifts)
   const schedules = includeSchedules
     ? scheduleData
+      // 默认不导出已删除人员对应排班，避免普通备份重新带回隐藏历史人员。
       .filter((schedule) => includeDeletedPeople || exportedPersonIds.has(schedule.personId))
       .map((schedule) => ({
         ...schedule,
@@ -257,6 +273,7 @@ export async function exportConfiguration(
   }
 }
 
+/** 断言导入 JSON 的顶层结构，具体字段合法性由 validateImportData 负责 */
 export function assertImportPayload(payload: unknown): asserts payload is { data: ImportedConfigData } {
   if (
     !payload ||
@@ -286,6 +303,7 @@ export interface ValidationError {
   message: string
 }
 
+/** 汇总多条导入校验错误，界面只展示前几条，避免旧备份错误过多时刷屏 */
 export class ImportValidationError extends Error {
   errors: ValidationError[]
 
@@ -300,6 +318,7 @@ export class ImportValidationError extends Error {
   }
 }
 
+/** 校验导入数据的字段类型、格式、重复 ID 和排班引用完整性 */
 export function validateImportData(data: ImportedConfigData): void {
   const prepared = prepareImportData(data)
   data = prepared.data
@@ -407,6 +426,7 @@ export function validateImportData(data: ImportedConfigData): void {
   }
 }
 
+/** 限制导入文件大小，避免浏览器读取超大 JSON 导致页面卡死 */
 export function checkImportFileSize(file: File): void {
   if (file.size > MAX_FILE_SIZE) {
     const sizeMB = (file.size / (1024 * 1024)).toFixed(1)
@@ -414,6 +434,7 @@ export function checkImportFileSize(file: File): void {
   }
 }
 
+/** 将已校验配置写入 IndexedDB，支持覆盖导入和合并导入 */
 export async function importConfiguration(data: ImportedConfigData, options: ImportOptions): Promise<void> {
   const prepared = prepareImportData(data)
   data = prepared.data
@@ -447,6 +468,7 @@ export async function importConfiguration(data: ImportedConfigData, options: Imp
     }
 
     const isArchived = Boolean(person.archivedAt)
+    // 用户未选择包含已删除人员时跳过真实已删除人员，但保留自动生成的历史占位人员。
     if (isArchived && !options.importArchivedPeople && !isGeneratedPlaceholderPerson(person)) {
       continue
     }
@@ -510,6 +532,7 @@ export async function importConfiguration(data: ImportedConfigData, options: Imp
       continue
     }
 
+    // 同一人员同一天只允许一条排班，导入文件内重复时以后出现的记录为准。
     importedScheduleMap.set(getScheduleSlotKey(schedule.personId, schedule.date), {
       ...schedule,
       shiftId: mappedShiftId,

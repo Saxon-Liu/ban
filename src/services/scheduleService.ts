@@ -5,16 +5,21 @@ import { getScheduleCellKey } from './scheduleStatistics'
 import { generateId, getCurrentDateTime, sortByOrder } from '@/utils'
 
 interface AssignShiftParams {
+  /** 被排班人员 ID */
   personId: string
+  /** 目标班次 ID */
   shiftId: string
+  /** 排班日期，格式 YYYY-MM-DD */
   date: string
 }
 
 interface AppendScheduleParams extends AssignShiftParams {
+  /** 排班月份，格式 YYYY-MM，用于索引查询 */
   month: string
 }
 
 interface InsertScheduleParams extends AppendScheduleParams {
+  /** 插入到目标单元格内的顺序位置 */
   targetIndex: number
 }
 
@@ -27,17 +32,26 @@ interface ReorderCellSchedulesParams {
 }
 
 interface TransferCellSchedulesParams {
+  /** 来源日期 */
   sourceDate: string
+  /** 来源班次 */
   sourceShiftId: string
+  /** 目标日期 */
   targetDate: string
+  /** 目标班次 */
   targetShiftId: string
+  /** 目标月份 */
   month: string
+  /** 当前视图已加载的排班快照，用于计算来源单元格顺序 */
   schedules: Schedule[]
+  /** copy 保留来源，move 会删除或更新来源记录 */
   mode: 'copy' | 'move'
 }
 
+/** 单元格复制/移动后的变更摘要，供页面增量刷新与提示使用 */
 export interface TransferCellSchedulesResult {
   createdCount: number
+  /** 因同一人员目标日期已有排班而跳过的数量 */
   conflictCount: number
   createdSchedules: Schedule[]
   updatedSchedules: Schedule[]
@@ -76,6 +90,7 @@ async function assertUniqueSchedulePerDay(
 }
 
 export class ScheduleService {
+  /** 给人员在指定日期分配班次；已有当天排班时改为更新原记录 */
   async assignShiftToPerson(
     params: AssignShiftParams
   ): Promise<{ outcome: 'created' | 'updated' | 'same-shift'; schedule?: Schedule }> {
@@ -102,6 +117,7 @@ export class ScheduleService {
     return { outcome: 'created', schedule: created }
   }
 
+  /** 按人员、日期、班次删除一条排班，常用于拖拽撤销或单元格快捷删除 */
   async removeScheduleByIdentity(personId: string, date: string, shiftId: string): Promise<Schedule | null> {
     await assertActiveSchedulingEntities(personId, shiftId)
     const schedules = await repositories.schedules.getByDate(date)
@@ -120,18 +136,21 @@ export class ScheduleService {
     return target
   }
 
+  /** 清空整个月份排班，返回删除数量 */
   async clearMonthSchedules(month: string): Promise<number> {
     const schedules = await repositories.schedules.getByMonth(month)
     await Promise.all(schedules.map((schedule) => repositories.schedules.delete(schedule.id)))
     return schedules.length
   }
 
+  /** 清空指定人员某个月份的排班，返回删除数量 */
   async clearPersonMonthSchedules(personId: string, month: string): Promise<number> {
     const schedules = await repositories.schedules.getByPersonAndMonth(personId, month)
     await Promise.all(schedules.map((schedule) => repositories.schedules.delete(schedule.id)))
     return schedules.length
   }
 
+  /** 追加人员到某个日期+班次单元格末尾 */
   async appendScheduleToCell(params: AppendScheduleParams): Promise<Schedule> {
     const { personId, shiftId, date, month } = params
     await assertActiveSchedulingEntities(personId, shiftId)
@@ -150,6 +169,7 @@ export class ScheduleService {
     })
   }
 
+  /** 插入人员到单元格指定位置，并重排该单元格内所有排班顺序 */
   async insertScheduleIntoCell(
     params: InsertScheduleParams
   ): Promise<{ created: Schedule; updated: Schedule[] }> {
@@ -200,6 +220,7 @@ export class ScheduleService {
     return { created, updated }
   }
 
+  /** 调整同一日期+班次单元格内的人员顺序 */
   async reorderSchedulesInCell(params: ReorderCellSchedulesParams): Promise<Schedule[] | null> {
     const { personId, date, shiftId, targetIndex, schedules } = params
     const cellList = getSchedulesForCell(schedules, date, shiftId)
@@ -229,6 +250,7 @@ export class ScheduleService {
     return updated
   }
 
+  /** 复制或移动整个单元格的排班到另一个日期+班次单元格 */
   async transferCellSchedules(params: TransferCellSchedulesParams): Promise<TransferCellSchedulesResult> {
     const {
       sourceDate,
@@ -278,6 +300,7 @@ export class ScheduleService {
       0
     )
 
+    // 业务约束：同一人员同一天只能有一条排班，跨班次复制/移动也必须按日期检测冲突。
     const existingByTargetDate = new Map<string, Schedule>()
     targetDateSchedules.forEach((schedule) => existingByTargetDate.set(schedule.personId, schedule))
     const targetPersonIds = new Set(currentTargetSchedules.map((schedule) => schedule.personId))
@@ -292,6 +315,7 @@ export class ScheduleService {
 
     for (const source of currentSourceSchedules) {
       const existingTargetSchedule = existingByTargetDate.get(source.personId)
+      // 同一天移动到另一个班次时可以直接复用原记录，不应被自己的记录判定为冲突。
       const canReuseSameDaySchedule =
         mode === 'move' &&
         source.date === targetDate &&

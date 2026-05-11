@@ -33,6 +33,7 @@ export interface ShiftRepository extends BaseRepository<Shift> {
 
   /**
    * 检查班次名称是否已存在
+   * 只检查未删除班次；已删除同名班次不阻止重新新增
    * @param name - 班次名称
    * @param excludeId - 排除的班次ID（更新时用于排除自身）
    */

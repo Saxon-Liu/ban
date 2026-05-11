@@ -104,6 +104,7 @@ export class IndexedDBPeopleRepository implements PeopleRepository {
       return true
     }
 
+    // 删除人员采用软删除：历史排班保留，今天及未来的待执行排班同步清理。
     const today = getDateString()
     const schedules = await db.getAllFromIndex('schedules', 'by-personId', id)
     const futureSchedules = schedules.filter((schedule) => schedule.date >= today)
@@ -154,6 +155,7 @@ export class IndexedDBPeopleRepository implements PeopleRepository {
     const people = await this.getAll()
     const db = await dbManager.getDB()
     const [year, monthNum] = month.split('-').map(Number)
+    // 统计页需要同时读取班次、当月排班和额外休息配置，合并后一次性计算。
     const [shifts, allSchedules, extraRestConfig] = await Promise.all([
       db.getAll('shifts'),
       db.getAllFromIndex('schedules', 'by-month', month),
@@ -207,6 +209,7 @@ export class IndexedDBPeopleRepository implements PeopleRepository {
   async isNameExists(name: string, excludeId?: string): Promise<boolean> {
     const db = await dbManager.getDB()
     const people = await db.getAllFromIndex('people', 'by-name', name)
+    // 同名限制只针对未删除人员，已删除历史人员不影响重新新增同名人员。
     const activePeople = people.filter((person: Person) => !person.archivedAt)
 
     if (excludeId) {
@@ -280,6 +283,7 @@ export class IndexedDBPeopleRepository implements PeopleRepository {
     const today = getDateString()
     const scheduleTx = db.transaction('schedules', 'readwrite')
 
+    // 批量删除同样只清理今天及未来排班，避免破坏历史统计和历史排班回看。
     for (const person of people) {
       if (!person) continue
       const schedules = await db.getAllFromIndex('schedules', 'by-personId', person.id)

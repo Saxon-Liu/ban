@@ -30,24 +30,28 @@ type HolidayCalendarRawPayload = {
   dates: HolidayCalendarRawDate[]
 }
 
+/** 页面实际展示用的节假日条目，补齐了中文标签和角标文案 */
 export type EffectiveHolidayEntry = HolidayCalendarEntry & {
   label: string
   marker: '休' | '班'
   typeLabel: string
 }
 
+/** 某一年某个来源下的节假日数据概览 */
 export type HolidaySourceSummary = {
   year: number
   source: HolidaySource
   count: number
 }
 
+/** 配置管理页展示的节假日同步和来源状态 */
 export type HolidayManagementSummary = {
   builtinYear: number
   activeSources: HolidaySourceSummary[]
   syncStates: HolidaySyncState[]
 }
 
+/** 年度节假日统计，用于配置页快速反馈同步结果 */
 export type HolidayYearStats = {
   total: number
   publicHoliday: number
@@ -141,6 +145,7 @@ async function fetchJsonWithTimeout(url: string) {
 export class HolidayService {
   private builtinEnsured = false
 
+  /** 确保内置节假日已写入本地库；应用运行期只执行一次，避免重复覆盖用户数据 */
   async ensureBuiltinHolidays(): Promise<void> {
     if (this.builtinEnsured) return
     const payload = BUILTIN_HOLIDAY_PAYLOAD.data
@@ -156,6 +161,7 @@ export class HolidayService {
     this.builtinEnsured = true
   }
 
+  /** 手动恢复内置节假日，仅替换 builtin 来源，不影响远程和手动导入来源 */
   async restoreBuiltinHolidays(): Promise<void> {
     const payload = BUILTIN_HOLIDAY_PAYLOAD.data
     assertHolidayPayload(payload)
@@ -168,6 +174,7 @@ export class HolidayService {
     this.builtinEnsured = true
   }
 
+  /** 获取指定年份最终生效的数据；手动导入优先，其次远程，最后内置 */
   async getEffectiveYearDates(
     region: HolidayRegion,
     year: number
@@ -186,6 +193,7 @@ export class HolidayService {
     return []
   }
 
+  /** 构建月份日期到节假日条目的映射，供排班表按日期快速标记 */
   async getEffectiveMonthDateMap(
     region: HolidayRegion,
     yearMonth: string
@@ -199,6 +207,7 @@ export class HolidayService {
     return map
   }
 
+  /** 导入 holiday-calendar JSON，并作为最高优先级的 manual-import 来源保存 */
   async importHolidayJson(payload: unknown): Promise<{ year: number; count: number }> {
     assertHolidayPayload(payload)
     await repositories.holidayCalendar.replaceEntriesForYearAndSource(
@@ -210,6 +219,7 @@ export class HolidayService {
     return { year: payload.year, count: payload.dates.length }
   }
 
+  /** 按预设远程地址顺序同步指定年份，全部失败时记录失败状态便于配置页查看 */
   async syncYearFromRemote(year: number): Promise<{ year: number; count: number; url: string }> {
     if (!Number.isInteger(year) || year < 2000) {
       throw new Error('节假日年份无效')
@@ -260,6 +270,7 @@ export class HolidayService {
       }
     }
 
+    // 将常见失败归类，避免把一长串底层网络错误直接暴露给普通用户。
     let message =
       '无法连接节假日数据源。当前可能离线，或远程地址不可访问。请稍后重试，或手动导入 holiday-calendar 格式的 JSON 文件。'
     if (notFoundCount === HOLIDAY_REMOTE_SOURCE_TEMPLATES.length) {
@@ -279,6 +290,7 @@ export class HolidayService {
     throw new Error(message)
   }
 
+  /** 汇总所有来源和最近同步状态，供配置管理页展示 */
   async getManagementSummary(): Promise<HolidayManagementSummary> {
     await this.ensureBuiltinHolidays()
     const [entries, syncStates] = await Promise.all([
@@ -306,6 +318,7 @@ export class HolidayService {
     }
   }
 
+  /** 统计指定年份最终生效数据中的节假日和调休工作日数量 */
   async getYearStats(region: HolidayRegion, year: number): Promise<HolidayYearStats> {
     const entries = await this.getEffectiveYearDates(region, year)
     const publicHoliday = entries.filter((entry) => entry.type === 'public_holiday').length
@@ -317,10 +330,12 @@ export class HolidayService {
     }
   }
 
+  /** 清空远程同步来源的数据，手动导入和内置数据不受影响 */
   async clearRemoteData(): Promise<void> {
     await repositories.holidayCalendar.deleteEntriesBySource('remote')
   }
 
+  /** 清空手动导入来源的数据，恢复到远程或内置来源生效 */
   async clearManualImportData(): Promise<void> {
     await repositories.holidayCalendar.deleteEntriesBySource('manual-import')
   }
