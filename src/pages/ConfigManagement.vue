@@ -66,7 +66,7 @@
           </div>
         </section>
 
-        <section class="config-block holiday-block">
+        <section class="config-block holiday-block" v-loading="holidayLoading">
           <div class="block-head">
             <div class="block-icon holiday">
               <el-icon><Calendar /></el-icon>
@@ -347,6 +347,7 @@ const holidayYearStats = ref<HolidayYearStats>({
   publicHoliday: 0,
   transferWorkday: 0,
 });
+const holidayLoading = ref(false);
 const isNarrowPage = ref(false);
 const holidaySyncYear = ref(new Date().getFullYear());
 const syncingHolidays = ref(false);
@@ -446,6 +447,7 @@ const latestHolidaySyncText = computed(() => {
 });
 
 const loadHolidaySummary = async (resetYear = false) => {
+  holidayLoading.value = true;
   try {
     holidaySummary.value = await holidayService.getManagementSummary();
     if (resetYear || !holidaySyncYear.value) {
@@ -457,6 +459,8 @@ const loadHolidaySummary = async (resetYear = false) => {
     );
   } catch (error) {
     console.error("加载节假日数据状态失败", error);
+  } finally {
+    holidayLoading.value = false;
   }
 };
 
@@ -487,7 +491,12 @@ onUnmounted(() => {
 });
 
 watch(holidaySyncYear, async (year) => {
-  holidayYearStats.value = await holidayService.getYearStats("CN", year);
+  holidayLoading.value = true;
+  try {
+    holidayYearStats.value = await holidayService.getYearStats("CN", year);
+  } finally {
+    holidayLoading.value = false;
+  }
 });
 
 /**
