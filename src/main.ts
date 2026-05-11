@@ -10,7 +10,7 @@ import { initializeSystem } from '@/services'
 import SchedulePage from './pages/Schedule.vue'
 import DashboardPage from './pages/Dashboard.vue'
 import LoginPage from './pages/Login.vue'
-import { isAuthSessionValid, refreshAuthSessionExpiry } from './utils'
+import { applyTheme, getStoredThemeMode, isAuthSessionValid, refreshAuthSessionExpiry } from './utils'
 
 const routes = [
   { path: '/', redirect: '/schedule' },
@@ -40,6 +40,7 @@ router.beforeEach((to, _from, next) => {
 // 创建应用
 const app = createApp(App)
 
+applyTheme(getStoredThemeMode())
 
 app.use(ElementPlus, {
   locale: zhCn

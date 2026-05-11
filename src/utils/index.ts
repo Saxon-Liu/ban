@@ -44,6 +44,13 @@ export {
   saveTextFile,
 } from './fileSave'
 
+export {
+  applyTheme,
+  getStoredThemeMode,
+  isSystemDark,
+  THEME_KEY,
+} from './theme'
+
 // 日期工具函数
 export { 
   getMonthDates, 

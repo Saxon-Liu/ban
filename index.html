@@ -5,6 +5,44 @@
     <link rel="icon" type="image/svg+xml" href="/vite.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>排班管理系统</title>
+    <style>
+      html,
+      body,
+      #app {
+        margin: 0;
+        min-height: 100%;
+      }
+
+      html {
+        background: #f5f7fa;
+        color: #303133;
+      }
+
+      html.dark {
+        background: #141414;
+        color: #e5eaf3;
+      }
+
+      body {
+        background: transparent;
+      }
+    </style>
+    <script>
+      (function () {
+        try {
+          var saved = localStorage.getItem("theme-mode") || "system";
+          var prefersDark =
+            window.matchMedia &&
+            window.matchMedia("(prefers-color-scheme: dark)").matches;
+          var useDark = saved === "dark" || (saved === "system" && prefersDark);
+          if (useDark) {
+            document.documentElement.classList.add("dark");
+          }
+        } catch (error) {
+          console.warn("[theme-bootstrap-error]", error);
+        }
+      })();
+    </script>
   </head>
   <body>
     <div id="app"></div>
