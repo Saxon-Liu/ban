@@ -17,7 +17,7 @@
         </div>
       </template> -->
 
-    <div class="schedule-container">
+    <div class="schedule-container" v-loading="loading">
       <!-- 左侧人员列表 -->
       <div class="people-sidebar">
         <div class="people-sidebar-header">
