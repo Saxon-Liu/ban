@@ -198,10 +198,16 @@
                           dragState.personId === personId &&
                           dragState.type === 'schedule',
                       }"
-                      :closable="isScheduleEditable(personId, shift.id)"
+                      :closable="
+                        isScheduleEditable(personId, shift.id) &&
+                        !isScheduleRemoving(personId, row.date, shift.id)
+                      "
                       disable-transitions
                       @close="removeSchedule(personId, row.date, shift.id)"
-                      :draggable="isScheduleEditable(personId, shift.id)"
+                      :draggable="
+                        isScheduleEditable(personId, shift.id) &&
+                        !isScheduleRemoving(personId, row.date, shift.id)
+                      "
                       @dragstart="
                         isScheduleEditable(personId, shift.id) &&
                         handleScheduleDragStart(
@@ -252,7 +258,14 @@
     </div>
 
     <!-- 排班详情对话框 -->
-    <el-dialog v-model="showScheduleDetail" title="排班详情" width="400px">
+    <el-dialog
+      v-model="showScheduleDetail"
+      title="排班详情"
+      width="400px"
+      :close-on-click-modal="!hasRemovingSchedule"
+      :close-on-press-escape="!hasRemovingSchedule"
+      :show-close="!hasRemovingSchedule"
+    >
       <div class="schedule-detail">
         <div style="font-size: 16px; font-weight: bold">
           {{ formatDate(selectedDate, "YYYY年MM月DD日") }} -
@@ -278,6 +291,9 @@
                   v-if="isScheduleEditable(personId, selectedShiftId)"
                   type="danger"
                   size="small"
+                  :loading="
+                    isScheduleRemoving(personId, selectedDate, selectedShiftId)
+                  "
                   @click="
                     removeSchedule(personId, selectedDate, selectedShiftId)
                   "
@@ -367,6 +383,7 @@ const selectedShiftId = ref("");
 const extraRestDaysForCurrentMonth = ref(0);
 const holidayDateMap = ref<Map<string, EffectiveHolidayEntry>>(new Map());
 const peopleSearch = ref("");
+const removingScheduleKeys = ref<Set<string>>(new Set());
 
 const dragState = ref<{
   active: boolean;
@@ -425,6 +442,7 @@ const monthDates = computed(() => {
 });
 
 const restShiftId = computed(() => getRestShiftId(shifts.value));
+const hasRemovingSchedule = computed(() => removingScheduleKeys.value.size > 0);
 
 const shiftNameDuplicateMap = computed(() => {
   const counts = new Map<string, number>();
@@ -444,6 +462,21 @@ const getShiftDisplayName = (shiftId: string) => {
   if (duplicateCount <= 1) return shift.name;
   return `${shift.name} (${getIdDisplaySuffix(shift.id)})`;
 };
+
+const getScheduleRemovingKey = (
+  personId: string,
+  date: string,
+  shiftId: string
+) => `${personId}::${date}::${shiftId}`;
+
+const isScheduleRemoving = (
+  personId: string,
+  date: string,
+  shiftId: string
+) =>
+  removingScheduleKeys.value.has(
+    getScheduleRemovingKey(personId, date, shiftId)
+  );
 
 const scheduleCellMap = computed(() => {
   const map = new Map<string, Schedule[]>();
@@ -1020,6 +1053,11 @@ const removeSchedule = async (
   date: string,
   shiftId: string
 ) => {
+  const removingKey = getScheduleRemovingKey(personId, date, shiftId);
+  if (removingScheduleKeys.value.has(removingKey)) return;
+  removingScheduleKeys.value = new Set(removingScheduleKeys.value).add(
+    removingKey
+  );
   try {
     const removed = await scheduleService.removeScheduleByIdentity(
       personId,
@@ -1033,6 +1071,10 @@ const removeSchedule = async (
   } catch (error) {
     console.error("删除排班失败:", error);
     ElMessage.error("删除排班失败");
+  } finally {
+    const nextRemovingKeys = new Set(removingScheduleKeys.value);
+    nextRemovingKeys.delete(removingKey);
+    removingScheduleKeys.value = nextRemovingKeys;
   }
 };
 

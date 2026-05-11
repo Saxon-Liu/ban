@@ -50,6 +50,8 @@
       title="忘记密码"
       width="420px"
       :close-on-click-modal="false"
+      :close-on-press-escape="!resetLoading"
+      :show-close="!resetLoading"
     >
       <el-alert
         title="请联系系统管理员获取恢复码"
@@ -89,8 +91,16 @@
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="showResetDialog = false">取消</el-button>
-        <el-button type="primary" @click="handleResetPassword">确定</el-button>
+        <el-button :disabled="resetLoading" @click="showResetDialog = false">
+          取消
+        </el-button>
+        <el-button
+          type="primary"
+          :loading="resetLoading"
+          @click="handleResetPassword"
+        >
+          确定
+        </el-button>
       </template>
     </el-dialog>
   </div>
@@ -114,6 +124,7 @@ const router = useRouter()
 const route = useRoute()
 const formRef = ref<FormInstance>()
 const loading = ref(false)
+const resetLoading = ref(false)
 
 const showResetDialog = ref(false)
 const resetFormRef = ref<FormInstance>()
@@ -151,7 +162,7 @@ const resetRules: FormRules = {
 }
 
 const handleResetPassword = async () => {
-  if (!resetFormRef.value) return
+  if (!resetFormRef.value || resetLoading.value) return
   if (isResetInCooldown.value) {
     ElMessage.warning(resetCooldownRemainingText.value)
     return
@@ -163,43 +174,48 @@ const handleResetPassword = async () => {
     return
   }
 
-  if (!(await verifyResetCode(resetForm.resetCode))) {
-    const state = syncResetFailState()
-    state.count += 1
-    if (state.count >= 5) {
-      state.cooldownUntil = Date.now() + 30 * 1000
-      resetFailState.value = state
-      writeScopedFailState(RESET_FAIL_STORAGE_KEY, state)
-      resetCooldownRemaining.value = 30
-      startResetCooldownTick()
-      ElMessage.error('连续 5 次恢复码错误，请等待 30 秒后重试')
-    } else {
-      writeScopedFailState(RESET_FAIL_STORAGE_KEY, state)
-      ElMessage.error(`恢复码错误，还剩余 ${5 - state.count} 次尝试机会`)
+  resetLoading.value = true
+  try {
+    if (!(await verifyResetCode(resetForm.resetCode))) {
+      const state = syncResetFailState()
+      state.count += 1
+      if (state.count >= 5) {
+        state.cooldownUntil = Date.now() + 30 * 1000
+        resetFailState.value = state
+        writeScopedFailState(RESET_FAIL_STORAGE_KEY, state)
+        resetCooldownRemaining.value = 30
+        startResetCooldownTick()
+        ElMessage.error('连续 5 次恢复码错误，请等待 30 秒后重试')
+      } else {
+        writeScopedFailState(RESET_FAIL_STORAGE_KEY, state)
+        ElMessage.error(`恢复码错误，还剩余 ${5 - state.count} 次尝试机会`)
+      }
+      resetForm.resetCode = ''
+      return
     }
+
+    clearScopedFailState(RESET_FAIL_STORAGE_KEY)
+    syncResetFailState()
+
+    if (resetMode.value === 'default') {
+      clearCustomSecret()
+      ElMessage.success('密码已恢复为默认值，请使用默认密码登录')
+    } else {
+      await setCustomSecret(resetForm.customKey)
+      ElMessage.success('密码已重置，请使用新密码登录')
+    }
+
+    invalidateAuthSessions()
+    clearFailState()
+
+    showResetDialog.value = false
     resetForm.resetCode = ''
-    return
+    resetForm.customKey = ''
+    resetMode.value = 'default'
+    form.secretKey = ''
+  } finally {
+    resetLoading.value = false
   }
-
-  clearScopedFailState(RESET_FAIL_STORAGE_KEY)
-  syncResetFailState()
-
-  if (resetMode.value === 'default') {
-    clearCustomSecret()
-    ElMessage.success('密码已恢复为默认值，请使用默认密码登录')
-  } else {
-    await setCustomSecret(resetForm.customKey)
-    ElMessage.success('密码已重置，请使用新密码登录')
-  }
-
-  invalidateAuthSessions()
-  clearFailState()
-
-  showResetDialog.value = false
-  resetForm.resetCode = ''
-  resetForm.customKey = ''
-  resetMode.value = 'default'
-  form.secretKey = ''
 }
 
 onBeforeUnmount(() => {

@@ -44,6 +44,7 @@ export function useAutoLogout() {
   let forceLogoutTimer: ReturnType<typeof setTimeout> | null = null
   let warningVisible = false
   let closingForActivity = false
+  // 用递增 token 区分已失效的弹窗回调，避免退出登录后旧弹窗继续触发状态变更。
   let warningToken = 0
 
   const isPublicRoute = () => route.path === '/login' || route.matched.some(record => record.meta.public)
@@ -97,6 +98,7 @@ export function useAutoLogout() {
   }
 
   const handleWarningClosed = () => {
+    // 程序主动关闭弹窗只表示用户继续使用，不应进入取消登录分支。
     if (closingForActivity) {
       closingForActivity = false
       return
@@ -115,6 +117,7 @@ export function useAutoLogout() {
     const currentToken = ++warningToken
     warningVisible = true
     forceLogoutTimer = setTimeout(() => {
+      // 如果弹窗已被活动、路由跳转或手动退出关闭，则忽略旧定时器。
       if (currentToken !== warningToken) {
         return
       }

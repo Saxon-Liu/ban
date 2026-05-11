@@ -725,11 +725,15 @@ const handleReplacePersonSelect = (targetId: string, newId: string) => {
 const isPersonClearing = (personId: string) => personClearingMap[personId] === true;
 
 const handleClearPersonSchedules = async (person: Person) => {
+  if (personClearingMap[person.id]) return;
   if (!currentMonth.value) {
     ElMessage.warning("请选择要清空的月份");
     return;
   }
 
+  personClearingMap[person.id] = true;
+  let clearError: unknown = null;
+  let clearResult: "empty" | "cleared" | null = null;
   try {
     await ElMessageBox.confirm(
       `确认 <strong style="color: var(--el-color-danger);">清空 ${person.name} 在 ${currentMonth.value} 的所有排班</strong>？<br/>此操作 <strong style="color: var(--el-color-danger);">不可恢复</strong>！`,
@@ -741,28 +745,56 @@ const handleClearPersonSchedules = async (person: Person) => {
         confirmButtonClass: "el-button--danger",
         cancelButtonClass: "el-button--primary",
         dangerouslyUseHTMLString: true,
+        beforeClose: async (action, instance, done) => {
+          if (action !== "confirm") {
+            done();
+            return;
+          }
+
+          const previousText = instance.confirmButtonText;
+          instance.confirmButtonLoading = true;
+          instance.confirmButtonText = "清空中...";
+          try {
+            const personSchedules =
+              await repositories.schedules.getByPersonAndMonth(
+                person.id,
+                currentMonth.value!
+              );
+
+            if (personSchedules.length === 0) {
+              clearResult = "empty";
+            } else {
+              await scheduleService.clearPersonMonthSchedules(
+                person.id,
+                currentMonth.value!
+              );
+              clearResult = "cleared";
+            }
+          } catch (error) {
+            clearError = error;
+          } finally {
+            instance.confirmButtonLoading = false;
+            instance.confirmButtonText = previousText;
+            done();
+          }
+        },
       }
     );
   } catch {
+    personClearingMap[person.id] = false;
     return;
   }
 
-  personClearingMap[person.id] = true;
   try {
-    const personSchedules = await repositories.schedules.getByPersonAndMonth(
-      person.id,
-      currentMonth.value
-    );
+    if (clearError) {
+      throw clearError;
+    }
 
-    if (personSchedules.length === 0) {
+    if (clearResult === "empty") {
       ElMessage.info(`${person.name} 在当前月份暂无排班`);
       return;
     }
 
-    await scheduleService.clearPersonMonthSchedules(
-      person.id,
-      currentMonth.value
-    );
     schedules.value = schedules.value.filter(
       (schedule) =>
         !(

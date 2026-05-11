@@ -45,10 +45,22 @@
           </el-table-column>
           <el-table-column label="操作" width="180">
             <template #default="{ row }">
-              <el-button type="primary" size="small" @click="handleEdit(row)" :icon="Edit">
+              <el-button
+                type="primary"
+                size="small"
+                @click="handleEdit(row)"
+                :icon="Edit"
+                :disabled="isShiftDeleting(row.id)"
+              >
                 编辑
               </el-button>
-              <el-button type="danger" size="small" @click="handleDelete(row)" :icon="Delete">
+              <el-button
+                type="danger"
+                size="small"
+                @click="handleDelete(row)"
+                :icon="Delete"
+                :disabled="isShiftDeleting(row.id)"
+              >
                 删除
               </el-button>
             </template>
@@ -62,6 +74,9 @@
       v-model="showAddDialog"
       :title="editingShift ? '编辑班次' : '新增班次'"
       width="400px"
+      :close-on-click-modal="!submittingShift"
+      :close-on-press-escape="!submittingShift"
+      :show-close="!submittingShift"
     >
       <el-form
         :model="shiftForm"
@@ -83,8 +98,12 @@
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="showAddDialog = false">取消</el-button>
-        <el-button type="primary" @click="handleSubmit">确定</el-button>
+        <el-button @click="showAddDialog = false" :disabled="submittingShift">
+          取消
+        </el-button>
+        <el-button type="primary" :loading="submittingShift" @click="handleSubmit">
+          确定
+        </el-button>
       </template>
     </el-dialog>
   </div>
@@ -102,9 +121,11 @@ import Sortable from "sortablejs";
 // 响应式数据
 const shifts = ref<Shift[]>([]);
 const loading = ref(false);
+const submittingShift = ref(false);
 const showAddDialog = ref(false);
 const editingShift = ref<Shift | null>(null);
 const shiftFormRef = ref();
+const deletingShiftMap = reactive<Record<string, boolean>>({});
 let sortableInstance: Sortable | null = null;
 
 // 表单数据
@@ -226,33 +247,60 @@ const handleEdit = (shift: Shift) => {
  * 删除班次
  */
 const handleDelete = async (shift: Shift) => {
+  if (deletingShiftMap[shift.id]) return;
+  deletingShiftMap[shift.id] = true;
+  let deleteError: unknown = null;
   try {
     // 检查是否有排班记录
     const hasSchedules = await repositories.shifts.hasScheduleRecords(shift.id);
+
+    const confirmOptions = {
+      confirmButtonText: "确定",
+      cancelButtonText: "取消",
+      type: "warning" as const,
+      beforeClose: async (
+        action: string,
+        instance: { confirmButtonLoading: boolean; confirmButtonText: string },
+        done: () => void
+      ) => {
+        if (action !== "confirm") {
+          done();
+          return;
+        }
+
+        const previousText = instance.confirmButtonText;
+        instance.confirmButtonLoading = true;
+        instance.confirmButtonText = "删除中...";
+        try {
+          await repositories.shifts.delete(shift.id);
+        } catch (error) {
+          deleteError = error;
+        } finally {
+          instance.confirmButtonLoading = false;
+          instance.confirmButtonText = previousText;
+          done();
+        }
+      },
+    };
 
     if (hasSchedules) {
       await ElMessageBox.confirm(
         `班次 "${shift.name}" 已有历史排班记录。删除后会保留历史排班，但不再出现在后续排班中。是否继续？`,
         "确认删除",
-        {
-          confirmButtonText: "确定",
-          cancelButtonText: "取消",
-          type: "warning",
-        }
+        confirmOptions
       );
     } else {
       await ElMessageBox.confirm(
         `确定要删除班次 "${shift.name}" 吗？删除后该班次将不再出现在后续排班中。`,
         "确认删除",
-        {
-          confirmButtonText: "确定",
-          cancelButtonText: "取消",
-          type: "warning",
-        }
+        confirmOptions
       );
     }
 
-    await repositories.shifts.delete(shift.id);
+    if (deleteError) {
+      throw deleteError;
+    }
+
     ElMessage.success("删除成功");
     await loadShifts();
   } catch (error) {
@@ -265,6 +313,8 @@ const handleDelete = async (shift: Shift) => {
       });
       ElMessage.error((error as any)?.message || "删除失败");
     }
+  } finally {
+    deletingShiftMap[shift.id] = false;
   }
 };
 
@@ -272,6 +322,8 @@ const handleDelete = async (shift: Shift) => {
  * 提交表单
  */
 const handleSubmit = async () => {
+  if (submittingShift.value) return;
+  submittingShift.value = true;
   try {
     await shiftFormRef.value.validate();
 
@@ -315,6 +367,8 @@ const handleSubmit = async () => {
       stack: (error as any)?.stack,
     });
     ElMessage.error("保存失败");
+  } finally {
+    submittingShift.value = false;
   }
 };
 
@@ -337,6 +391,8 @@ onBeforeUnmount(() => {
   sortableInstance?.destroy();
   sortableInstance = null;
 });
+
+const isShiftDeleting = (id: string) => deletingShiftMap[id] === true;
 </script>
 
 <style lang="scss" scoped>
