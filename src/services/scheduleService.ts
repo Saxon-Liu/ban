@@ -53,14 +53,14 @@ function getSchedulesForCell(schedules: Schedule[], date: string, shiftId: strin
 async function assertActiveSchedulingEntities(personId: string, shiftId?: string): Promise<void> {
   const person = await repositories.people.getById(personId)
   if (!person || person.archivedAt) {
-    throw new Error('该人员已归档，仅保留历史排班，不可继续排班')
+    throw new Error('该人员已删除，仅保留历史排班，不可继续排班')
   }
 
   if (!shiftId) return
 
   const shift = await repositories.shifts.getById(shiftId)
   if (!shift || shift.archivedAt) {
-    throw new Error('该班次已归档，仅保留历史排班，不可继续排班')
+    throw new Error('该班次已删除，仅保留历史排班，不可继续排班')
   }
 }
 
@@ -247,12 +247,12 @@ export class ScheduleService {
 
     const sourceShift = await repositories.shifts.getById(sourceShiftId)
     if (!sourceShift || sourceShift.archivedAt) {
-      throw new Error('该班次已归档，仅保留历史排班，不可继续排班')
+      throw new Error('该班次已删除，仅保留历史排班，不可继续排班')
     }
 
     const targetShift = await repositories.shifts.getById(targetShiftId)
     if (!targetShift || targetShift.archivedAt) {
-      throw new Error('该班次已归档，仅保留历史排班，不可继续排班')
+      throw new Error('该班次已删除，仅保留历史排班，不可继续排班')
     }
 
     const personIds = [...new Set(sourceSchedules.map(s => s.personId))]

@@ -26,9 +26,14 @@
             <el-button type="primary" @click="handleExport">
               导出配置
             </el-button>
-            <el-checkbox v-model="exportSchedules" class="inline-option">
-              同时导出排班记录
-            </el-checkbox>
+            <div>
+              <el-checkbox v-model="exportDeletedPeople" class="inline-option">
+                包含已删除人员
+              </el-checkbox>
+              <el-checkbox v-model="exportSchedules" class="inline-option">
+                同时导出排班记录
+              </el-checkbox>
+            </div>
           </div>
         </section>
 
@@ -52,7 +57,7 @@
 
             <div>
               <el-checkbox v-model="importArchivedPeople" class="inline-option">
-                包含归档人员
+                包含已删除人员
               </el-checkbox>
               <el-checkbox v-model="replaceAllBeforeImport" class="inline-option">
                 导入前清空现有数据
@@ -333,6 +338,7 @@ const holidayFileInput = ref<HTMLInputElement | null>(null);
 const router = useRouter();
 const reinitializing = ref(false);
 const exportSchedules = ref(true);
+const exportDeletedPeople = ref(false);
 const importArchivedPeople = ref(false);
 const replaceAllBeforeImport = ref(false);
 const holidaySummary = ref<HolidayManagementSummary | null>(null);
@@ -528,7 +534,10 @@ const handleChangePassword = async () => {
  */
 const handleExport = async () => {
   try {
-    const configData = await exportConfiguration(exportSchedules.value);
+    const configData = await exportConfiguration(
+      exportSchedules.value,
+      exportDeletedPeople.value,
+    );
 
     const blob = new Blob([JSON.stringify(configData, null, 2)], {
       type: "application/json",
@@ -722,8 +731,8 @@ const handleFileChange = async (event: Event) => {
         ? "将先清空当前全部数据，再导入配置。该操作不可撤销，是否继续？"
         : `将按 ID 合并导入配置${
             importArchivedPeople.value
-              ? "，并包含本次文件中的归档人员"
-              : "，本次文件中的归档人员及其排班将被跳过，不影响本地已存在的归档数据"
+              ? "，并包含本次文件中的已删除人员"
+              : "，本次文件中的已删除人员及其排班将被跳过，不影响本地已存在的历史删除数据"
           }。是否继续？`,
       "确认导入",
       {
