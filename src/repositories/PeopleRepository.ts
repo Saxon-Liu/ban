@@ -12,7 +12,7 @@ import type { Person, PersonStatistics, PersonWithStatistics } from '@/types'
  */
 export interface PeopleRepository extends BaseRepository<Person> {
   /**
-   * 获取所有人员，包含已归档人员
+   * 获取所有人员，包含已删除人员
    */
   getAllIncludingArchived(): Promise<Person[]>
 
@@ -39,4 +39,11 @@ export interface PeopleRepository extends BaseRepository<Person> {
    * 获取下一个颜色（从颜色池中循环选择）
    */
   getNextColor(): Promise<string>
+
+  /**
+   * 检查人员姓名是否已存在
+   * @param name - 人员姓名
+   * @param excludeId - 排除的人员ID（更新时用于排除自身）
+   */
+  isNameExists(name: string, excludeId?: string): Promise<boolean>
 }

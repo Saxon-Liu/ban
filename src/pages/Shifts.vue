@@ -27,7 +27,11 @@
               </div>
             </template>
           </el-table-column>
-          <el-table-column prop="name" label="班次名称" minWidth="120" />
+          <el-table-column label="班次名称" minWidth="120">
+            <template #default="{ row }">
+              {{ getShiftDisplayName(row) }}
+            </template>
+          </el-table-column>
           <el-table-column label="颜色" width="120">
             <template #default="{ row }">
               <div class="color-display">
@@ -92,6 +96,7 @@ import { ElMessage, ElMessageBox } from "element-plus";
 import { Plus, Edit, Delete, Rank } from "@element-plus/icons-vue";
 import type { Shift } from "@/types";
 import { repositories } from "@/repositories";
+import { getIdDisplaySuffix } from "@/utils";
 import Sortable from "sortablejs";
 
 // 响应式数据
@@ -120,6 +125,21 @@ const shiftRules = {
     },
   ],
   color: [{ required: true, message: "请选择颜色", trigger: "change" }],
+};
+
+const shiftNameDuplicateMap = () => {
+  const counts = new Map<string, number>();
+  shifts.value.forEach((shift) => {
+    const key = shift.name.trim();
+    counts.set(key, (counts.get(key) || 0) + 1);
+  });
+  return counts;
+};
+
+const getShiftDisplayName = (shift: Shift) => {
+  const duplicateCount = shiftNameDuplicateMap().get(shift.name.trim()) || 0;
+  if (duplicateCount <= 1) return shift.name;
+  return `${shift.name} (${getIdDisplaySuffix(shift.id)})`;
 };
 
 /**
@@ -212,8 +232,8 @@ const handleDelete = async (shift: Shift) => {
 
     if (hasSchedules) {
       await ElMessageBox.confirm(
-        `班次 "${shift.name}" 已有历史排班记录。归档后会保留历史排班，但不再出现在后续排班中。是否继续？`,
-        "确认归档",
+        `班次 "${shift.name}" 已有历史排班记录。删除后会保留历史排班，但不再出现在后续排班中。是否继续？`,
+        "确认删除",
         {
           confirmButtonText: "确定",
           cancelButtonText: "取消",
@@ -222,8 +242,8 @@ const handleDelete = async (shift: Shift) => {
       );
     } else {
       await ElMessageBox.confirm(
-        `确定要归档班次 "${shift.name}" 吗？归档后该班次将不再出现在后续排班中。`,
-        "确认归档",
+        `确定要删除班次 "${shift.name}" 吗？删除后该班次将不再出现在后续排班中。`,
+        "确认删除",
         {
           confirmButtonText: "确定",
           cancelButtonText: "取消",
@@ -233,7 +253,7 @@ const handleDelete = async (shift: Shift) => {
     }
 
     await repositories.shifts.delete(shift.id);
-    ElMessage.success("归档成功");
+    ElMessage.success("删除成功");
     await loadShifts();
   } catch (error) {
     if (error !== "cancel") {

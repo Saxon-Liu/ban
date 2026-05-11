@@ -6,6 +6,7 @@
 // 通用工具函数
 export {
   generateId,
+  getIdDisplaySuffix,
   getCurrentDateTime,
   formatDate,
   sortByOrder,
