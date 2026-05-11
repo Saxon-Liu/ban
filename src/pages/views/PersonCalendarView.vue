@@ -43,9 +43,15 @@
                         <el-tag
                           v-if="getRemainingRestDays(person.id) !== null"
                           size="small"
-                          :type="getRemainingRestDays(person.id)! > 0 ? 'success' : getRemainingRestDays(person.id)! === 0 ? 'warning' : 'danger'"
+                          :type="getRemainingRestDays(person.id)! > 0 ? 'success' : getRemainingRestDays(person.id)! === 0 ? 'primary' : 'danger'"
                         >
-                          剩余 {{ getRemainingRestDays(person.id) }} 天
+                          {{
+                            getRemainingRestDays(person.id)! < 0
+                              ? `超休${Math.abs(getRemainingRestDays(person.id)!)}天`
+                              : getRemainingRestDays(person.id)! === 0
+                                ? "已休满"
+                                : `剩余 ${getRemainingRestDays(person.id)} 天`
+                          }}
                         </el-tag>
                       </div>
                     </div>
