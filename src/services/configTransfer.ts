@@ -30,11 +30,13 @@ export interface ExportConfigPayload {
 interface ImportedPersonRecord extends Partial<Person> {
   id: string
   name: string
+  __generatedPlaceholder?: boolean
 }
 
 interface ImportedShiftRecord extends Partial<Shift> {
   id: string
   name: string
+  __generatedPlaceholder?: boolean
 }
 
 interface ImportedExtraRestConfigRecord extends Partial<ExtraRestConfig> {
@@ -55,6 +57,115 @@ export interface ImportedConfigData {
   shifts: ImportedShiftRecord[]
   extraRestConfigs?: ImportedExtraRestConfigRecord[]
   schedules?: ImportedScheduleRecord[]
+}
+
+export interface ImportPreparationResult {
+  data: ImportedConfigData
+  repairs: string[]
+}
+
+const IMPORT_PLACEHOLDER_PERSON_PREFIX = '导入补全人员'
+const IMPORT_PLACEHOLDER_SHIFT_PREFIX = '导入补全班次'
+const IMPORT_PLACEHOLDER_COLOR = '#909399'
+
+function createImportedPlaceholderPerson(id: string, index: number): ImportedPersonRecord {
+  const timestamp = new Date()
+  return {
+    id,
+    name: `${IMPORT_PLACEHOLDER_PERSON_PREFIX}${index}`,
+    color: IMPORT_PLACEHOLDER_COLOR,
+    baseRestDays: 0,
+    order: Number.MAX_SAFE_INTEGER - index,
+    archivedAt: timestamp,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    __generatedPlaceholder: true,
+  }
+}
+
+function createImportedPlaceholderShift(id: string, index: number): ImportedShiftRecord {
+  const timestamp = new Date()
+  return {
+    id,
+    name: `${IMPORT_PLACEHOLDER_SHIFT_PREFIX}${index}`,
+    color: IMPORT_PLACEHOLDER_COLOR,
+    isRest: false,
+    order: Number.MAX_SAFE_INTEGER - index,
+    archivedAt: timestamp,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+    __generatedPlaceholder: true,
+  }
+}
+
+function isGeneratedPlaceholderPerson(person: ImportedPersonRecord): boolean {
+  return person.__generatedPlaceholder === true
+}
+
+export function prepareImportData(data: ImportedConfigData): ImportPreparationResult {
+  const normalizedPeople = [...data.people]
+  const normalizedShifts = [...data.shifts]
+  const normalizedExtraRestConfigs = [...(data.extraRestConfigs || [])]
+  const normalizedSchedules = [...(data.schedules || [])]
+  const repairs: string[] = []
+
+  const personIds = new Set(
+    normalizedPeople
+      .map((person) => person.id)
+      .filter((id): id is string => typeof id === 'string' && id.length > 0)
+  )
+  const shiftIds = new Set(
+    normalizedShifts
+      .map((shift) => shift.id)
+      .filter((id): id is string => typeof id === 'string' && id.length > 0)
+  )
+
+  const missingPersonIds: string[] = []
+  const missingShiftIds: string[] = []
+
+  for (const schedule of normalizedSchedules) {
+    if (
+      schedule.personId &&
+      typeof schedule.personId === 'string' &&
+      !personIds.has(schedule.personId)
+    ) {
+      personIds.add(schedule.personId)
+      missingPersonIds.push(schedule.personId)
+    }
+
+    if (
+      schedule.shiftId &&
+      typeof schedule.shiftId === 'string' &&
+      !shiftIds.has(schedule.shiftId)
+    ) {
+      shiftIds.add(schedule.shiftId)
+      missingShiftIds.push(schedule.shiftId)
+    }
+  }
+
+  missingPersonIds.forEach((id, index) => {
+    normalizedPeople.push(createImportedPlaceholderPerson(id, index + 1))
+  })
+  if (missingPersonIds.length > 0) {
+    repairs.push(`检测到 ${missingPersonIds.length} 个排班引用缺失人员，已自动补全为已删除占位人员`)
+  }
+
+  missingShiftIds.forEach((id, index) => {
+    normalizedShifts.push(createImportedPlaceholderShift(id, index + 1))
+  })
+  if (missingShiftIds.length > 0) {
+    repairs.push(`检测到 ${missingShiftIds.length} 个排班引用缺失班次，已自动补全为占位班次`)
+  }
+
+  return {
+    data: {
+      people: normalizedPeople,
+      shifts: normalizedShifts,
+      extraRestConfigs: normalizedExtraRestConfigs,
+      schedules: data.schedules ? normalizedSchedules : undefined,
+    },
+    repairs,
+  }
 }
 
 function parseTimestamp(value: unknown): Date {
@@ -109,17 +220,25 @@ export function normalizeImportedShifts(shifts: ImportedShiftRecord[] = []) {
   }
 }
 
-export async function exportConfiguration(includeSchedules: boolean): Promise<ExportConfigPayload> {
-  const [people, shifts, extraRestConfigs, scheduleData] = await Promise.all([
-    repositories.people.getAllIncludingArchived(),
+export async function exportConfiguration(
+  includeSchedules: boolean,
+  includeDeletedPeople = false
+): Promise<ExportConfigPayload> {
+  const [peopleData, shifts, extraRestConfigs, scheduleData] = await Promise.all([
+    includeDeletedPeople
+      ? repositories.people.getAllIncludingArchived()
+      : repositories.people.getAll(),
     repositories.shifts.getAllIncludingArchived(),
     repositories.extraRestConfigs.getAll(),
     includeSchedules ? repositories.schedules.getAll() : Promise.resolve([] as Schedule[]),
   ])
 
+  const exportedPersonIds = new Set(peopleData.map((person) => person.id))
   const { shifts: normalizedShifts } = normalizeImportedShifts(shifts)
   const schedules = includeSchedules
-    ? scheduleData.map((schedule) => ({
+    ? scheduleData
+      .filter((schedule) => includeDeletedPeople || exportedPersonIds.has(schedule.personId))
+      .map((schedule) => ({
         ...schedule,
         createdAt: schedule.createdAt.toISOString(),
         updatedAt: schedule.updatedAt.toISOString(),
@@ -130,7 +249,7 @@ export async function exportConfiguration(includeSchedules: boolean): Promise<Ex
     version: '1.0',
     timestamp: new Date().toISOString(),
     data: {
-      people,
+      people: peopleData,
       shifts: normalizedShifts,
       extraRestConfigs,
       schedules,
@@ -182,6 +301,8 @@ export class ImportValidationError extends Error {
 }
 
 export function validateImportData(data: ImportedConfigData): void {
+  const prepared = prepareImportData(data)
+  data = prepared.data
   const errors: ValidationError[] = []
 
   const seenPersonIds = new Set<string>()
@@ -294,6 +415,8 @@ export function checkImportFileSize(file: File): void {
 }
 
 export async function importConfiguration(data: ImportedConfigData, options: ImportOptions): Promise<void> {
+  const prepared = prepareImportData(data)
+  data = prepared.data
   validateImportData(data)
 
   const now = getCurrentDateTime()
@@ -324,7 +447,7 @@ export async function importConfiguration(data: ImportedConfigData, options: Imp
     }
 
     const isArchived = Boolean(person.archivedAt)
-    if (isArchived && !options.importArchivedPeople) {
+    if (isArchived && !options.importArchivedPeople && !isGeneratedPlaceholderPerson(person)) {
       continue
     }
 
