@@ -123,7 +123,6 @@ export function useAutoLogout() {
         clearTimers()
         return
       }
-      warningVisible = false
       void logout('长时间未操作，已自动退出登录')
     }, (config.totalMinutes - config.warningMinutes) * 60 * 1000)
 
@@ -154,7 +153,6 @@ export function useAutoLogout() {
         return
       }
       if (action === 'cancel') {
-        warningVisible = false
         void logout('长时间未操作，已退出登录')
         return
       }
