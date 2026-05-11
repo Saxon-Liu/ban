@@ -30,7 +30,7 @@ export class IndexedDBPeopleRepository implements PeopleRepository {
   }
 
   /**
-   * 获取所有人员，包含已归档人员
+   * 获取所有人员，包含已删除人员
    */
   async getAllIncludingArchived(): Promise<Person[]> {
     const db = await dbManager.getDB()
@@ -199,6 +199,21 @@ export class IndexedDBPeopleRepository implements PeopleRepository {
     
     // 如果所有颜色都已使用，则随机选择一个
     return DEFAULT_COLORS[Math.floor(Math.random() * DEFAULT_COLORS.length)]
+  }
+
+  /**
+   * 检查人员姓名是否已存在
+   */
+  async isNameExists(name: string, excludeId?: string): Promise<boolean> {
+    const db = await dbManager.getDB()
+    const people = await db.getAllFromIndex('people', 'by-name', name)
+    const activePeople = people.filter((person: Person) => !person.archivedAt)
+
+    if (excludeId) {
+      return activePeople.some((person) => person.id !== excludeId)
+    }
+
+    return activePeople.length > 0
   }
 
   /**

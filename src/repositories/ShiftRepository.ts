@@ -11,7 +11,7 @@ import type { Shift } from '@/types'
  */
 export interface ShiftRepository extends BaseRepository<Shift> {
   /**
-   * 获取所有班次，包含已归档班次
+   * 获取所有班次，包含已删除班次
    */
   getAllIncludingArchived(): Promise<Shift[]>
 

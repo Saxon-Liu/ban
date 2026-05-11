@@ -29,7 +29,7 @@ export class IndexedDBShiftRepository implements ShiftRepository {
   }
 
   /**
-   * 获取所有班次，包含已归档班次
+   * 获取所有班次，包含已删除班次
    */
   async getAllIncludingArchived(): Promise<Shift[]> {
     const db = await dbManager.getDB()

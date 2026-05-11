@@ -46,7 +46,11 @@
           label="姓名"
           minWidth="120"
           show-overflow-tooltip
-        />
+        >
+          <template #default="{ row }">
+            {{ getPersonDisplayName(row) }}
+          </template>
+        </el-table-column>
         <el-table-column label="颜色" width="120">
           <template #default="{ row }">
             <div class="color-display">
@@ -142,7 +146,39 @@ import { Plus, Edit, Delete, Upload, Download, Rank } from "@element-plus/icons-
 import type { Person, PersonWithStatistics } from "@/types";
 import { repositories } from "@/repositories";
 import { excelExportService, getViewedScheduleMonth } from "@/services";
+import { getIdDisplaySuffix } from "@/utils";
 import Sortable from "sortablejs";
+
+const escapeHtml = (value: string) =>
+  value
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#39;");
+
+const buildDeleteConfirmMessage = (
+  personName: string,
+  hasSchedules: boolean,
+) => {
+  const safeName = escapeHtml(personName);
+  if (hasSchedules) {
+    return `
+      <div style="display:flex;flex-direction:column;gap:10px;line-height:1.7;">
+        <div>人员 <strong style="color:var(--el-color-primary);">"${safeName}"</strong> 已有 <strong style="color:var(--el-color-warning);">历史排班记录</strong>。</div>
+        <div>删除后将 <strong style="color:var(--el-color-success);">保留历史排班</strong>，并 <strong style="color:var(--el-color-danger);">清理今天及未来排班</strong>。</div>
+        <div>后续新增 <strong style="color:var(--el-color-primary);">同名人员</strong> 将按 <strong style="color:var(--el-color-danger);">新人员</strong> 处理。是否继续？</div>
+      </div>
+    `;
+  }
+
+  return `
+    <div style="display:flex;flex-direction:column;gap:10px;line-height:1.7;">
+      <div>确定要删除人员 <strong style="color:var(--el-color-primary);">"${safeName}"</strong> 吗？</div>
+      <div>删除后该人员将 <strong style="color:var(--el-color-danger);">不再出现在后续排班和人员列表中</strong></div>
+    </div>
+  `;
+};
 
 // 响应式数据
 const people = ref<PersonWithStatistics[]>([]);
@@ -177,6 +213,21 @@ const personRules = {
       trigger: "change",
     },
   ],
+};
+
+const personNameDuplicateMap = () => {
+  const counts = new Map<string, number>();
+  people.value.forEach((person) => {
+    const key = person.name.trim();
+    counts.set(key, (counts.get(key) || 0) + 1);
+  });
+  return counts;
+};
+
+const getPersonDisplayName = (person: Pick<Person, "id" | "name">) => {
+  const duplicateCount = personNameDuplicateMap().get(person.name.trim()) || 0;
+  if (duplicateCount <= 1) return person.name;
+  return `${person.name} (${getIdDisplaySuffix(person.id)})`;
 };
 
 /**
@@ -232,22 +283,24 @@ const handleDelete = async (person: PersonWithStatistics) => {
 
     if (hasSchedules) {
       await ElMessageBox.confirm(
-        `人员 "${person.name}" 已有历史排班记录。归档后会保留今天之前的历史排班，并自动清理今天及未来的待执行排班，后续新增同名人员也会视为新人员。是否继续？`,
-        "确认归档",
+        buildDeleteConfirmMessage(person.name, true),
+        "确认删除",
         {
           confirmButtonText: "确定",
           cancelButtonText: "取消",
           type: "warning",
+          dangerouslyUseHTMLString: true,
         }
       );
     } else {
       await ElMessageBox.confirm(
-        `确定要归档人员 "${person.name}" 吗？归档后该人员将不再出现在后续排班和人员列表中。`,
-        "确认归档",
+        buildDeleteConfirmMessage(person.name, false),
+        "确认删除",
         {
           confirmButtonText: "确定",
           cancelButtonText: "取消",
           type: "warning",
+          dangerouslyUseHTMLString: true,
         }
       );
     }
@@ -269,6 +322,16 @@ const handleDelete = async (person: PersonWithStatistics) => {
 const handleSubmit = async () => {
   try {
     await personFormRef.value.validate();
+
+    const isNameExists = await repositories.people.isNameExists(
+      personForm.name,
+      editingPerson.value?.id
+    );
+
+    if (isNameExists) {
+      ElMessage.error("人员姓名已存在");
+      return;
+    }
 
     if (editingPerson.value) {
       // 编辑模式

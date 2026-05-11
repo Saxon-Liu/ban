@@ -7,10 +7,37 @@ import dayjs from 'dayjs'
 
 /**
  * 生成唯一ID
- * 使用时间戳和随机数组合生成
+ * 优先使用 UUID，回退到时间戳和随机数组合
  */
 export function generateId(): string {
-  return `${Date.now()}-${Math.random().toString(36).substr(2, 9)}`
+  if (typeof globalThis.crypto !== 'undefined' && typeof globalThis.crypto.randomUUID === 'function') {
+    return globalThis.crypto.randomUUID()
+  }
+  return `${Date.now()}-${Math.random().toString(36).slice(2, 11)}`
+}
+
+/**
+ * 获取适合展示的短ID标识
+ * 优先提取 ID 中随机性更强的片段，避免展示时间戳部分
+ */
+export function getIdDisplaySuffix(id: string, length = 4): string {
+  if (!id) return ''
+
+  const normalizedLength = Math.max(3, Math.min(length, 8))
+  const trimmed = id.trim()
+  if (!trimmed) return ''
+
+  if (trimmed.includes('-')) {
+    const parts = trimmed.split('-').filter(Boolean)
+
+    if (parts.length > 1) {
+      const nonTimestampParts = parts.filter((part) => !/^\d{10,}$/.test(part))
+      const candidate = nonTimestampParts[nonTimestampParts.length - 1] || parts[parts.length - 1]
+      return candidate.slice(-normalizedLength)
+    }
+  }
+
+  return trimmed.slice(-normalizedLength)
 }
 
 /**
