@@ -5,7 +5,7 @@
 
 import type { Worksheet } from 'exceljs'
 import type { Shift, Person, Schedule } from '@/types'
-import { formatDate, getMonthDates, sortByOrder } from '@/utils'
+import { formatDate, getMonthDates, saveBlobFile, sortByOrder } from '@/utils'
 
 /**
  * 月度排班导出数据
@@ -200,20 +200,11 @@ export class ExcelExportService {
    * @param blob - Excel文件的Blob对象
    * @param filename - 文件名
    */
-  downloadExcel(blob: Blob, filename: string): void {
-    // 创建下载链接
-    const url = URL.createObjectURL(blob)
-    const link = document.createElement('a')
-    link.href = url
-    link.download = filename
-    
-    // 触发下载
-    document.body.appendChild(link)
-    link.click()
-    
-    // 清理
-    document.body.removeChild(link)
-    URL.revokeObjectURL(url)
+  async downloadExcel(blob: Blob, filename: string): Promise<{ saved: boolean; filePath?: string }> {
+    return saveBlobFile(blob, filename, [
+      { name: 'Excel 文件', extensions: ['xlsx'] },
+      { name: '所有文件', extensions: ['*'] },
+    ])
   }
 }
 

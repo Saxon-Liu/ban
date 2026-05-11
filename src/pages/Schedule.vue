@@ -57,7 +57,7 @@
                 type="danger"
                 plain
                 @click="handleClearCurrentMonth"
-                :loading="clearingSchedules"
+                :disabled="clearingSchedules"
                 :icon="Delete"
               >
               </el-button>
@@ -150,6 +150,7 @@ const jumpToMonth = (delta: number) => {
 };
 
 const handleExport = async () => {
+  if (exportLoading.value) return;
   if (!currentMonth.value) {
     ElMessage.warning("请选择要导出的月份");
     return;
@@ -170,8 +171,16 @@ const handleExport = async () => {
       scheduleData
     );
 
-    excelExportService.downloadExcel(blob, `${currentMonth.value}排班表.xlsx`);
-    ElMessage.success("Excel导出成功");
+    const result = await excelExportService.downloadExcel(
+      blob,
+      `${currentMonth.value}排班表.xlsx`
+    );
+    if (!result.saved) {
+      return;
+    }
+    ElMessage.success(
+      result.filePath ? `已导出到 ${result.filePath}` : "Excel导出成功"
+    );
   } catch (error) {
     console.error("导出Excel失败:", error);
     ElMessage.error("导出Excel失败，请稍后重试");
@@ -181,11 +190,15 @@ const handleExport = async () => {
 };
 
 const handleClearCurrentMonth = async () => {
+  if (clearingSchedules.value) return;
   if (!currentMonth.value) {
     ElMessage.warning("请选择要清空的月份");
     return;
   }
 
+  clearingSchedules.value = true;
+  let clearError: unknown = null;
+  let clearedCount = 0;
   try {
     const confirmMessage = `确认 <strong style="color: var(--el-color-danger);">清除 ${currentMonth.value} 的所有排班数据</strong>？<br/>此操作 <strong style="color: var(--el-color-danger);">不可恢复</strong>！`;
     await ElMessageBox.confirm(confirmMessage, "清空排班确认", {
@@ -195,16 +208,38 @@ const handleClearCurrentMonth = async () => {
       confirmButtonClass: "el-button--danger",
       cancelButtonClass: "el-button--primary",
       dangerouslyUseHTMLString: true,
+      beforeClose: async (action, instance, done) => {
+        if (action !== "confirm") {
+          done();
+          return;
+        }
+
+        const previousText = instance.confirmButtonText;
+        instance.confirmButtonLoading = true;
+        instance.confirmButtonText = "清除中...";
+        try {
+          clearedCount = await scheduleService.clearMonthSchedules(
+            currentMonth.value!
+          );
+        } catch (error) {
+          clearError = error;
+        } finally {
+          instance.confirmButtonLoading = false;
+          instance.confirmButtonText = previousText;
+          done();
+        }
+      },
     });
   } catch {
+    clearingSchedules.value = false;
     return;
   }
 
-  clearingSchedules.value = true;
   try {
-    const clearedCount = await scheduleService.clearMonthSchedules(
-      currentMonth.value
-    );
+    if (clearError) {
+      throw clearError;
+    }
+
     if (clearedCount === 0) {
       ElMessage.info("当前月份暂无排班数据");
       return;

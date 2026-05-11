@@ -27,11 +27,27 @@ interface ElectronExportLogResult {
   files?: string[]
 }
 
+interface ElectronSaveFileResult {
+  success: boolean
+  canceled?: boolean
+  filePath?: string
+}
+
 interface Window {
   electronAPI?: {
     getAppContext: () => Promise<ElectronAppContext>
     getVersion: () => Promise<string>
     exportLog: () => Promise<ElectronExportLogResult>
+    saveTextFile: (
+      defaultFileName: string,
+      content: string,
+      filters?: Array<{ name: string; extensions: string[] }>
+    ) => Promise<ElectronSaveFileResult>
+    saveBinaryFile: (
+      defaultFileName: string,
+      bytes: number[],
+      filters?: Array<{ name: string; extensions: string[] }>
+    ) => Promise<ElectronSaveFileResult>
     onThemeChange: (callback: (theme: 'dark' | 'light') => void) => () => void
     platform: string
     isElectron: true

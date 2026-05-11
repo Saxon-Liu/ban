@@ -23,7 +23,12 @@
             </div>
           </div>
           <div class="block-actions top-align import-actions">
-            <el-button type="primary" @click="handleExport">
+            <el-button
+              type="primary"
+              :loading="exportingConfig"
+              :disabled="importingConfig"
+              @click="handleExport"
+            >
               导出配置
             </el-button>
             <div>
@@ -51,7 +56,13 @@
             </div>
           </div>
           <div class="block-actions top-align">
-            <el-button type="warning" plain @click="handleImport">
+            <el-button
+              type="warning"
+              plain
+              :loading="importingConfig"
+              :disabled="exportingConfig"
+              @click="handleImport"
+            >
               选择文件
             </el-button>
 
@@ -142,7 +153,12 @@
           </div>
 
           <div class="holiday-actions">
-            <el-button type="warning" plain @click="handleHolidayImport">
+            <el-button
+              type="warning"
+              plain
+              :loading="importingHolidayJson"
+              @click="handleHolidayImport"
+            >
               导入 JSON
             </el-button>
             <el-button
@@ -156,7 +172,8 @@
             <el-button
               type="danger"
               plain
-              :loading="clearingHolidayData"
+              :loading="clearingRemoteHolidays"
+              :disabled="clearingManualHolidays"
               @click="handleClearRemoteHolidays"
             >
               清理无效
@@ -164,7 +181,8 @@
             <el-button
               type="danger"
               plain
-              :loading="clearingHolidayData"
+              :loading="clearingManualHolidays"
+              :disabled="clearingRemoteHolidays"
               @click="handleClearManualHolidays"
             >
               清理导入
@@ -245,6 +263,8 @@
       title="修改密码"
       width="400px"
       :close-on-click-modal="false"
+      :close-on-press-escape="!changingPassword"
+      :show-close="!changingPassword"
     >
       <el-form
         ref="passwordFormRef"
@@ -282,7 +302,12 @@
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="showChangePasswordDialog = false">取消</el-button>
+        <el-button
+          :disabled="changingPassword"
+          @click="showChangePasswordDialog = false"
+        >
+          取消
+        </el-button>
         <el-button
           type="primary"
           @click="handleChangePassword"
@@ -299,7 +324,6 @@
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from "vue";
 import { useRouter } from "vue-router";
 import {
-  ElLoading,
   ElMessage,
   ElMessageBox,
   type FormInstance,
@@ -326,10 +350,11 @@ import {
 import {
   clearCustomSecret,
   invalidateAuthSessions,
+  saveTextFile,
+  setReloadSuccessNotice,
   setCustomSecret,
   verifyLoginSecret,
 } from "@/utils";
-import type { LoadingInstance } from "element-plus/es/components/loading/src/loading";
 import type { HolidayManagementSummary, HolidayYearStats } from "@/services";
 import type { HolidaySource } from "@/types";
 
@@ -337,6 +362,8 @@ const fileInput = ref<HTMLInputElement | null>(null);
 const holidayFileInput = ref<HTMLInputElement | null>(null);
 const router = useRouter();
 const reinitializing = ref(false);
+const exportingConfig = ref(false);
+const importingConfig = ref(false);
 const exportSchedules = ref(true);
 const exportDeletedPeople = ref(false);
 const importArchivedPeople = ref(false);
@@ -351,9 +378,10 @@ const holidayLoading = ref(false);
 const isNarrowPage = ref(false);
 const holidaySyncYear = ref(new Date().getFullYear());
 const syncingHolidays = ref(false);
+const importingHolidayJson = ref(false);
 const restoringBuiltinHolidays = ref(false);
-const clearingHolidayData = ref(false);
-let reinitializeLoading: LoadingInstance | null = null;
+const clearingRemoteHolidays = ref(false);
+const clearingManualHolidays = ref(false);
 
 const NARROW_PAGE_BREAKPOINT = 720;
 
@@ -503,7 +531,7 @@ watch(holidaySyncYear, async (year) => {
  * 修改密码
  */
 const handleChangePassword = async () => {
-  if (!passwordFormRef.value) return;
+  if (!passwordFormRef.value || changingPassword.value) return;
   try {
     await passwordFormRef.value.validate();
   } catch {
@@ -542,103 +570,112 @@ const handleChangePassword = async () => {
  * 导出配置
  */
 const handleExport = async () => {
+  if (exportingConfig.value) return;
+  exportingConfig.value = true;
   try {
     const configData = await exportConfiguration(
       exportSchedules.value,
       exportDeletedPeople.value,
     );
-
-    const blob = new Blob([JSON.stringify(configData, null, 2)], {
-      type: "application/json",
-    });
-    const url = URL.createObjectURL(blob);
-    const link = document.createElement("a");
-    link.href = url;
-    link.download = `排班配置备份_${new Date()
+    const fileName = `排班配置备份_${new Date()
       .toISOString()
       .slice(0, 10)
       .replace(/-/g, "")}.json`;
-    document.body.appendChild(link);
-    link.click();
-    document.body.removeChild(link);
-    URL.revokeObjectURL(url);
+    const serializedContent = JSON.stringify(configData, null, 2);
+    const result = await saveTextFile(serializedContent, fileName, [
+      { name: "JSON 文件", extensions: ["json"] },
+      { name: "所有文件", extensions: ["*"] },
+    ]);
+    if (!result.saved) {
+      return;
+    }
 
-    ElMessage.success("配置导出成功");
+    ElMessage.success(
+      result.filePath ? `配置已导出到 ${result.filePath}` : "配置导出成功",
+    );
   } catch (error: unknown) {
     console.error("导出配置失败:", error);
     ElMessage.error(
       "导出配置失败: " + (error instanceof Error ? error.message : "未知错误"),
     );
+  } finally {
+    exportingConfig.value = false;
   }
 };
 
 const reinitializeResetPassword = ref(false);
 
 const handleReinitialize = async () => {
+  if (reinitializing.value) return;
   const confirmMessage = `确认 <strong style="color: var(--el-color-danger);">删除所有数据并重新初始化系统</strong>？<br/>该操作 <strong style="color: var(--el-color-danger);">不可撤销</strong>，请确保已备份。`;
 
+  let initialized = false;
   try {
-    await new Promise<void>((resolve, reject) => {
-      ElMessageBox.confirm(
-        `<div style="display: flex; flex-direction: column; gap: 12px;">
+    await ElMessageBox.confirm(
+      `<div style="display: flex; flex-direction: column; gap: 12px;">
           <div>${confirmMessage}</div>
           <div style="display: flex; align-items: center; gap: 8px;">
             <input type="checkbox" id="reset-pwd" style="width: 16px; height: 16px; cursor: pointer;">
             <label for="reset-pwd" style="cursor: pointer; user-select: none; font-size: 14px;">同时重置登录密码为默认值</label>
           </div>
         </div>`,
-        "初始化系统",
-        {
-          confirmButtonText: "确认初始化",
-          cancelButtonText: "取消",
-          confirmButtonClass: "el-button--danger",
-          cancelButtonClass: "el-button--primary",
-          dangerouslyUseHTMLString: true,
-          type: "warning",
-          beforeClose: (action, _instance, done) => {
-            if (action === "confirm") {
-              const checkbox = document.getElementById(
-                "reset-pwd",
-              ) as HTMLInputElement;
-              reinitializeResetPassword.value = checkbox
-                ? checkbox.checked
-                : false;
-            }
+      "初始化系统",
+      {
+        confirmButtonText: "确认初始化",
+        cancelButtonText: "取消",
+        confirmButtonClass: "el-button--danger",
+        cancelButtonClass: "el-button--primary",
+        closeOnClickModal: false,
+        closeOnPressEscape: false,
+        dangerouslyUseHTMLString: true,
+        type: "warning",
+        beforeClose: async (action, instance, done) => {
+          if (action !== "confirm") {
             done();
-          },
+            return;
+          }
+
+          const checkbox = document.getElementById(
+            "reset-pwd",
+          ) as HTMLInputElement;
+          reinitializeResetPassword.value = checkbox
+            ? checkbox.checked
+            : false;
+
+          const previousText = instance.confirmButtonText;
+          reinitializing.value = true;
+          instance.confirmButtonLoading = true;
+          instance.confirmButtonText = "初始化中...";
+          try {
+            await dbManager.deleteDatabase();
+            await initializeDefaultShifts();
+            if (reinitializeResetPassword.value) {
+              clearCustomSecret();
+              setReloadSuccessNotice(
+                "系统已重新初始化，登录密码已重置为默认值"
+              );
+            } else {
+              setReloadSuccessNotice("系统已重新初始化");
+            }
+            invalidateAuthSessions();
+            initialized = true;
+            window.location.reload();
+          } catch (error) {
+            console.error("系统初始化失败", error);
+            ElMessage.error("初始化失败，请稍后重试");
+            reinitializing.value = false;
+            instance.confirmButtonLoading = false;
+            instance.confirmButtonText = previousText;
+          }
         },
-      )
-        .then(() => resolve())
-        .catch(() => reject());
-    });
+      },
+    );
   } catch {
+    reinitializing.value = false;
     return;
   }
 
-  reinitializing.value = true;
-  reinitializeLoading = ElLoading.service({
-    lock: true,
-    text: "正在初始化系统，请稍候...",
-    background: "rgba(255, 255, 255, 0.72)",
-  });
-  try {
-    await dbManager.deleteDatabase();
-    await initializeDefaultShifts();
-    if (reinitializeResetPassword.value) {
-      clearCustomSecret();
-      invalidateAuthSessions();
-      ElMessage.success("系统已重新初始化，登录密码已重置为默认值");
-    } else {
-      invalidateAuthSessions();
-      ElMessage.success("系统已重新初始化");
-    }
-    setTimeout(() => window.location.reload(), 1200);
-  } catch (error) {
-    console.error("系统初始化失败", error);
-    ElMessage.error("初始化失败，请稍后重试");
-  } finally {
-    reinitializeLoading?.close();
-    reinitializeLoading = null;
+  if (!initialized) {
     reinitializing.value = false;
   }
 };
@@ -647,6 +684,7 @@ const handleReinitialize = async () => {
  * 触发导入文件选择
  */
 const handleImport = () => {
+  if (importingConfig.value) return;
   if (fileInput.value) {
     fileInput.value.value = "";
     fileInput.value.click();
@@ -654,6 +692,7 @@ const handleImport = () => {
 };
 
 const handleHolidayImport = () => {
+  if (importingHolidayJson.value) return;
   if (holidayFileInput.value) {
     holidayFileInput.value.value = "";
     holidayFileInput.value.click();
@@ -661,6 +700,7 @@ const handleHolidayImport = () => {
 };
 
 const handleSyncHolidays = async () => {
+  if (syncingHolidays.value) return;
   syncingHolidays.value = true;
   try {
     const result = await holidayService.syncYearFromRemote(
@@ -678,6 +718,7 @@ const handleSyncHolidays = async () => {
 };
 
 const handleRestoreBuiltinHolidays = async () => {
+  if (restoringBuiltinHolidays.value) return;
   restoringBuiltinHolidays.value = true;
   try {
     await holidayService.restoreBuiltinHolidays();
@@ -692,7 +733,8 @@ const handleRestoreBuiltinHolidays = async () => {
 };
 
 const handleClearRemoteHolidays = async () => {
-  clearingHolidayData.value = true;
+  if (clearingRemoteHolidays.value) return;
+  clearingRemoteHolidays.value = true;
   try {
     await holidayService.clearRemoteData();
     await loadHolidaySummary();
@@ -701,12 +743,13 @@ const handleClearRemoteHolidays = async () => {
     console.error("清理远程节假日失败", error);
     ElMessage.error("清理远程节假日失败");
   } finally {
-    clearingHolidayData.value = false;
+    clearingRemoteHolidays.value = false;
   }
 };
 
 const handleClearManualHolidays = async () => {
-  clearingHolidayData.value = true;
+  if (clearingManualHolidays.value) return;
+  clearingManualHolidays.value = true;
   try {
     await holidayService.clearManualImportData();
     await loadHolidaySummary();
@@ -715,7 +758,7 @@ const handleClearManualHolidays = async () => {
     console.error("清理手动导入节假日失败", error);
     ElMessage.error("清理手动导入节假日失败");
   } finally {
-    clearingHolidayData.value = false;
+    clearingManualHolidays.value = false;
   }
 };
 
@@ -727,6 +770,9 @@ const handleFileChange = async (event: Event) => {
   const file = target.files?.[0];
   if (!file) return;
 
+  importingConfig.value = true;
+  let importError: unknown = null;
+  let imported = false;
   try {
     checkImportFileSize(file);
 
@@ -748,26 +794,43 @@ const handleFileChange = async (event: Event) => {
         confirmButtonText: "确定",
         cancelButtonText: "取消",
         type: "warning",
+        closeOnClickModal: false,
+        closeOnPressEscape: false,
+        beforeClose: async (action, instance, done) => {
+          if (action !== "confirm") {
+            done();
+            return;
+          }
+
+          const previousText = instance.confirmButtonText;
+          instance.confirmButtonLoading = true;
+          instance.confirmButtonText = "导入中...";
+          try {
+            await importConfiguration(configData.data, {
+              importArchivedPeople: importArchivedPeople.value,
+              replaceAllBeforeImport: replaceAllBeforeImport.value,
+            });
+            setReloadSuccessNotice("配置导入成功");
+            imported = true;
+            window.location.reload();
+          } catch (error) {
+            importError = error;
+            instance.confirmButtonLoading = false;
+            instance.confirmButtonText = previousText;
+            done();
+          }
+        },
       },
     );
-
-    await importConfiguration(configData.data, {
-      importArchivedPeople: importArchivedPeople.value,
-      replaceAllBeforeImport: replaceAllBeforeImport.value,
-    });
-    ElMessage.success("配置导入成功");
-
-    setTimeout(() => {
-      window.location.reload();
-    }, 1500);
   } catch (error: unknown) {
-    if (error !== "cancel") {
-      console.error("导入配置失败:", error);
+    const actualError = importError ?? error;
+    if (actualError !== "cancel") {
+      console.error("导入配置失败:", actualError);
       const errorMsg =
-        error instanceof ImportValidationError
-          ? `数据校验失败:\n${error.message}`
-          : error instanceof Error
-            ? error.message
+        actualError instanceof ImportValidationError
+          ? `数据校验失败:\n${actualError.message}`
+          : actualError instanceof Error
+            ? actualError.message
             : "未知错误";
       ElMessage.error({
         message: `导入配置失败: ${errorMsg}`,
@@ -775,6 +838,11 @@ const handleFileChange = async (event: Event) => {
         showClose: true,
       });
     }
+  } finally {
+    if (!imported) {
+      importingConfig.value = false;
+    }
+    if (fileInput.value) fileInput.value.value = "";
   }
 };
 
@@ -783,6 +851,7 @@ const handleHolidayFileChange = async (event: Event) => {
   const file = target.files?.[0];
   if (!file) return;
 
+  importingHolidayJson.value = true;
   try {
     checkImportFileSize(file);
     const text = await file.text();
@@ -797,6 +866,7 @@ const handleHolidayFileChange = async (event: Event) => {
         (error instanceof Error ? error.message : "未知错误"),
     );
   } finally {
+    importingHolidayJson.value = false;
     if (holidayFileInput.value) holidayFileInput.value.value = "";
   }
 };
