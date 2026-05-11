@@ -29,7 +29,7 @@
                         :style="{ backgroundColor: person.color }"
                       />
                       <div>
-                        <div class="person-name">{{ person.name }}</div>
+                        <div class="person-name">{{ getPersonDisplayName(person) }}</div>
                         <div class="person-meta__sub">{{ monthLabel }}</div>
                       </div>
                       <div class="rest-days-tags">
@@ -51,44 +51,31 @@
                     </div>
                     <div class="header-actions">
                       <div class="card-actions">
-                        <el-dropdown
-                          trigger="click"
-                          :hide-on-click="false"
+                        <el-select
+                          v-model="switchPersonSelections[person.id]"
+                          class="person-switch-select"
+                          size="small"
+                          filterable
+                          clearable
+                          placeholder="搜索切换"
+                          :disabled="getReplaceCandidates(person.id).length === 0"
+                          @change="(value: string) => handleReplacePersonSelect(person.id, value)"
                         >
-                          <el-button
-                            text
-                            size="small"
-                            :disabled="availablePeople.length === 0"
+                          <el-option
+                            v-for="candidate in getReplaceCandidates(person.id)"
+                            :key="candidate.id"
+                            :label="getPersonDisplayName(candidate)"
+                            :value="candidate.id"
                           >
                             <span class="dropdown-person-option">
-                              <!-- <span class="color-dot" :style="{ backgroundColor: person.color }" /> -->
-                              <span>切换</span>
+                              <span
+                                class="color-dot"
+                                :style="{ backgroundColor: candidate.color }"
+                              />
+                              <span>{{ getPersonDisplayName(candidate) }}</span>
                             </span>
-                            <el-icon class="caret"><ArrowDown /></el-icon>
-                          </el-button>
-                          <template #dropdown>
-                            <el-dropdown-menu v-if="availablePeople.length > 0">
-                              <el-dropdown-item
-                                v-for="candidate in availablePeople"
-                                :key="candidate.id"
-                                :disabled="candidate.id === person.id"
-                                @click="
-                                  replacePersonCard(person.id, candidate.id)
-                                "
-                              >
-                                <span class="dropdown-person-option">
-                                  <span
-                                    class="color-dot"
-                                    :style="{
-                                      backgroundColor: candidate.color,
-                                    }"
-                                  />
-                                  <span>{{ candidate.name }}</span>
-                                </span>
-                              </el-dropdown-item>
-                            </el-dropdown-menu>
-                          </template>
-                        </el-dropdown>
+                          </el-option>
+                        </el-select>
                         <el-button
                           text
                           size="small"
@@ -198,32 +185,31 @@
           <template v-if="selectedPersonIds.length === 0">
             <el-empty :image-size="120">
               <template #description>
-                <el-dropdown
-                  trigger="click"
+                <el-select
+                  v-model="addPersonSelection"
+                  class="person-add-select empty"
+                  size="small"
+                  filterable
+                  clearable
+                  placeholder="搜索姓名后添加"
                   :disabled="availablePeople.length === 0"
-                  @command="addPersonById"
+                  @change="handleAddPersonSelect"
                 >
-                  <el-button type="primary" size="small" :icon="Plus"
-                    >点击选择人员</el-button
+                  <el-option
+                    v-for="person in availablePeople"
+                    :key="person.id"
+                    :label="getPersonDisplayName(person)"
+                    :value="person.id"
                   >
-                  <template #dropdown>
-                    <el-dropdown-menu v-if="availablePeople.length > 0">
-                      <el-dropdown-item
-                        v-for="person in availablePeople"
-                        :key="person.id"
-                        :command="person.id"
-                      >
-                        <span class="dropdown-person-option">
-                          <span
-                            class="color-dot"
-                            :style="{ backgroundColor: person.color }"
-                          />
-                          <span>{{ person.name }}</span>
-                        </span>
-                      </el-dropdown-item>
-                    </el-dropdown-menu>
-                  </template>
-                </el-dropdown>
+                    <span class="dropdown-person-option">
+                      <span
+                        class="color-dot"
+                        :style="{ backgroundColor: person.color }"
+                      />
+                      <span>{{ getPersonDisplayName(person) }}</span>
+                    </span>
+                  </el-option>
+                </el-select>
               </template>
             </el-empty>
           </template>
@@ -234,32 +220,31 @@
                 当前最多可同时展示 4 人日历
               </div>
             </div>
-            <el-dropdown
-              trigger="click"
+            <el-select
+              v-model="addPersonSelection"
+              class="person-add-select"
+              size="small"
+              filterable
+              clearable
+              placeholder="搜索后添加"
               :disabled="availablePeople.length === 0"
-              @command="addPersonById"
+              @change="handleAddPersonSelect"
             >
-              <el-button type="primary" size="small" :icon="Plus">
-                添加人员
-              </el-button>
-              <template #dropdown>
-                <el-dropdown-menu v-if="availablePeople.length > 0">
-                  <el-dropdown-item
-                    v-for="person in availablePeople"
-                    :key="person.id"
-                    :command="person.id"
-                  >
-                    <span class="dropdown-person-option">
-                      <span
-                        class="color-dot"
-                        :style="{ backgroundColor: person.color }"
-                      />
-                      <span>{{ person.name }}</span>
-                    </span>
-                  </el-dropdown-item>
-                </el-dropdown-menu>
-              </template>
-            </el-dropdown>
+              <el-option
+                v-for="person in availablePeople"
+                :key="person.id"
+                :label="getPersonDisplayName(person)"
+                :value="person.id"
+              >
+                <span class="dropdown-person-option">
+                  <span
+                    class="color-dot"
+                    :style="{ backgroundColor: person.color }"
+                  />
+                  <span>{{ getPersonDisplayName(person) }}</span>
+                </span>
+              </el-option>
+            </el-select>
           </template>
         </div>
       </div>
@@ -317,7 +302,6 @@ import {
   watch,
 } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
-import { Plus, ArrowDown } from "@element-plus/icons-vue";
 import draggable from "vuedraggable";
 import dayjs from "dayjs";
 import type { ExtraRestConfig, Person, Schedule } from "@/types";
@@ -331,6 +315,7 @@ import {
 } from "@/services";
 import type { EffectiveHolidayEntry } from "@/services";
 import {
+  getIdDisplaySuffix,
   getAdaptiveTextColor,
   getNextMonth,
   getPreviousMonth,
@@ -386,6 +371,8 @@ const {
 const extraRestConfigs = ref<Map<string, ExtraRestConfig>>(new Map());
 const holidayDateMap = ref<Map<string, EffectiveHolidayEntry>>(new Map());
 const selectedPersonIds = ref<string[]>(getInitialSelectedPersonIds());
+const addPersonSelection = ref("");
+const switchPersonSelections = reactive<Record<string, string>>({});
 const calendarWrapperRef = ref<HTMLElement | null>(null);
 const wrapperWidth = ref(0);
 const personClearingMap = reactive<Record<string, boolean>>({});
@@ -433,9 +420,26 @@ const selectedPeople = computed(() =>
     .filter((p): p is Person => Boolean(p))
 );
 
+const personNameDuplicateMap = computed(() => {
+  const counts = new Map<string, number>();
+  people.value.forEach((person) => {
+    const key = person.name.trim();
+    counts.set(key, (counts.get(key) || 0) + 1);
+  });
+  return counts;
+});
+
+const getPersonDisplayName = (person: Pick<Person, "id" | "name">) => {
+  const duplicateCount = personNameDuplicateMap.value.get(person.name.trim()) || 0;
+  if (duplicateCount <= 1) return person.name;
+  return `${person.name} (${getIdDisplaySuffix(person.id)})`;
+};
+
 const availablePeople = computed(() =>
   activePeople.value.filter((person) => !selectedPersonIds.value.includes(person.id))
 );
+
+const getReplaceCandidates = (_targetId: string) => availablePeople.value;
 
 const layoutClass = computed<"flex-single-col" | "flex-two-cols">(() => {
   const count = selectedPeople.value.length;
@@ -492,7 +496,7 @@ const handleDragUpdate = (newPeople: Person[]) => {
 
 const loadBaseData = async () => {
   const [peopleData, shiftData, extraRestConfigData] = await Promise.all([
-    repositories.people.getAllIncludingArchived(),
+    repositories.people.getAll(),
     repositories.shifts.getAllIncludingArchived(),
     repositories.extraRestConfigs.getAll(),
   ]);
@@ -504,7 +508,7 @@ const loadBaseData = async () => {
   );
 
   selectedPersonIds.value = selectedPersonIds.value
-    .filter((id) => people.value.some((p) => p.id === id))
+    .filter((id) => peopleData.some((p) => p.id === id))
     .slice(0, 4);
 };
 
@@ -654,7 +658,7 @@ const handleCellClick = (personId: string, date: string, event: Event) => {
     existingSchedule &&
     !isScheduleEditable(personId, existingSchedule.shiftId)
   ) {
-    ElMessage.warning("该历史排班已归档，只允许查看，不可修改");
+    ElMessage.warning("该历史排班关联人员或班次已删除，只允许查看，不可修改");
     return;
   }
   quickSelect.personId = personId;
@@ -689,6 +693,12 @@ const addPersonById = (personId: string) => {
   selectedPersonIds.value = [...selectedPersonIds.value, personId];
 };
 
+const handleAddPersonSelect = (personId: string) => {
+  if (!personId) return;
+  addPersonById(personId);
+  addPersonSelection.value = "";
+};
+
 const removePersonCard = (personId: string) => {
   selectedPersonIds.value = selectedPersonIds.value.filter(
     (id) => id !== personId
@@ -704,6 +714,12 @@ const replacePersonCard = (targetId: string, newId: string) => {
   selectedPersonIds.value = selectedPersonIds.value.map((id) =>
     id === targetId ? newId : id
   );
+};
+
+const handleReplacePersonSelect = (targetId: string, newId: string) => {
+  if (!newId) return;
+  replacePersonCard(targetId, newId);
+  switchPersonSelections[targetId] = "";
 };
 
 const isPersonClearing = (personId: string) => personClearingMap[personId] === true;
@@ -853,6 +869,18 @@ defineExpose({
 .content {
   min-width: 0;
   padding: 8px;
+}
+
+.person-switch-select {
+  width: 120px;
+}
+
+.person-add-select {
+  width: 160px;
+}
+
+.person-add-select.empty {
+  width: 220px;
 }
 
 /* 布局相关 */
