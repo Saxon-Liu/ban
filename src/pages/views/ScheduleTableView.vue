@@ -60,7 +60,11 @@
                 </span>
                 <span
                   class="person-rest-days"
-                  :class="{ 'over-rest': person.statistics?.isOverRest }"
+                  :class="{
+                    'over-rest': person.statistics?.isOverRest,
+                    'full-rest':
+                      person.statistics && person.statistics.remainingRestDays === 0,
+                  }"
                 >
                   {{
                     person.statistics
@@ -68,7 +72,9 @@
                         ? `超休${Math.abs(
                             person.statistics.remainingRestDays
                           )}天`
-                        : `剩余休息${person.statistics.remainingRestDays}天`
+                        : person.statistics.remainingRestDays === 0
+                          ? "已休满"
+                          : `剩余休息${person.statistics.remainingRestDays}天`
                       : "加载中..."
                   }}
                 </span>
@@ -1198,6 +1204,11 @@ defineExpose({
 
     &.over-rest {
       color: var(--el-color-error);
+      font-weight: bold;
+    }
+
+    &.full-rest {
+      color: var(--el-color-primary);
       font-weight: bold;
     }
   }

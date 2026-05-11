@@ -75,12 +75,19 @@
         <el-table-column prop="baseRestDays" label="基础月休天数" width="120" />
         <el-table-column label="当前月份剩余未排休天数" width="200">
           <template #default="{ row }">
-            <span :class="{ 'over-rest': row.statistics?.isOverRest }">
+            <span
+              :class="{
+                'over-rest': row.statistics?.isOverRest,
+                'full-rest': row.statistics && row.statistics.remainingRestDays === 0,
+              }"
+            >
               {{
                 row.statistics
                   ? row.statistics.isOverRest
                     ? `超休${Math.abs(row.statistics.remainingRestDays)}天`
-                    : `剩余休息${row.statistics.remainingRestDays}天`
+                    : row.statistics.remainingRestDays === 0
+                      ? "已休满"
+                      : `剩余休息${row.statistics.remainingRestDays}天`
                   : "加载中..."
               }}
             </span>
@@ -721,6 +728,11 @@ const isPersonDeleting = (id: string) => deletingPersonMap[id] === true;
 
   .over-rest {
     color: var(--el-color-error);
+    font-weight: bold;
+  }
+
+  .full-rest {
+    color: var(--el-color-primary);
     font-weight: bold;
   }
 
