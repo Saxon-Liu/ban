@@ -62,7 +62,7 @@ import { useRoute } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { Calendar, Tools, Fold, Expand, SwitchButton } from '@element-plus/icons-vue'
 import { useAutoLogout } from '@/composables/useAutoLogout'
-import { consumeReloadSuccessNotice } from '@/utils'
+import { applyTheme, consumeReloadSuccessNotice, getStoredThemeMode, THEME_KEY } from '@/utils'
 
 const route = useRoute()
 
@@ -73,7 +73,6 @@ const handleLogout = () => {
   void triggerLogout()
 }
 
-const THEME_KEY = 'theme-mode'
 const themeMode = ref<'system' | 'light' | 'dark'>('system')
 const ASIDE_WIDTH_KEY = 'aside-width'
 const ASIDE_COLLAPSE_KEY = 'aside-collapsed'
@@ -81,17 +80,11 @@ const asideWidth = ref(130)
 const asideCollapsed = ref(true)
 let media: MediaQueryList | null = null
 let mediaChangeHandler: (() => void) | null = null
+let isAsideResizing = false
 
-const isSystemDark = () => window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches
-const applyTheme = () => {
-  const mode = themeMode.value
-  const dark = mode === 'system' ? isSystemDark() : mode === 'dark'
-  const root = document.documentElement
-  if (dark) {
-    root.classList.add('dark')
-  } else {
-    root.classList.remove('dark')
-  }
+const setResizeSelectionState = (resizing: boolean) => {
+  isAsideResizing = resizing
+  document.body.classList.toggle('aside-resizing', resizing)
 }
 
 onMounted(() => {
@@ -100,9 +93,8 @@ onMounted(() => {
     ElMessage.success(reloadNotice)
   }
   try {
-    const saved = localStorage.getItem(THEME_KEY) as 'system' | 'light' | 'dark' | null
-    themeMode.value = saved || 'system'
-    applyTheme()
+    themeMode.value = getStoredThemeMode()
+    applyTheme(themeMode.value)
   } catch (error: any) {
     console.error('[theme-init-error]', {
       time: new Date().toISOString(),
@@ -127,7 +119,7 @@ onMounted(() => {
     })
   }
   media = window.matchMedia('(prefers-color-scheme: dark)')
-  mediaChangeHandler = () => themeMode.value === 'system' && applyTheme()
+  mediaChangeHandler = () => themeMode.value === 'system' && applyTheme(themeMode.value)
   media.addEventListener('change', mediaChangeHandler)
 })
 
@@ -135,11 +127,14 @@ onBeforeUnmount(() => {
   if (media && mediaChangeHandler) {
     media.removeEventListener('change', mediaChangeHandler)
   }
+  if (isAsideResizing) {
+    setResizeSelectionState(false)
+  }
 })
 
 watch(themeMode, (val) => {
   localStorage.setItem(THEME_KEY, val)
-  applyTheme()
+  applyTheme(val)
 })
 
 const toggleAside = () => {
@@ -159,6 +154,8 @@ const toggleAside = () => {
 const startAsideResize = (e: MouseEvent) => {
   try {
     if (asideCollapsed.value) return
+    e.preventDefault()
+    setResizeSelectionState(true)
     const startX = e.clientX
     const startWidth = asideWidth.value
     const onMove = (ev: MouseEvent) => {
@@ -179,6 +176,7 @@ const startAsideResize = (e: MouseEvent) => {
       try {
         window.removeEventListener('mousemove', onMove)
         window.removeEventListener('mouseup', onUp)
+        setResizeSelectionState(false)
         localStorage.setItem(ASIDE_WIDTH_KEY, String(asideWidth.value))
       } catch (error: any) {
         console.error('[aside-resize-up-error]', {
@@ -215,6 +213,11 @@ body {
   margin: 0;
   padding: 0;
   height: 100%;
+}
+
+body.aside-resizing {
+  user-select: none;
+  cursor: col-resize;
 }
 
 .el-container {

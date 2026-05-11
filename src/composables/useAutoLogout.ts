@@ -156,7 +156,7 @@ export function useAutoLogout() {
         return
       }
       if (action === 'cancel') {
-        void logout('长时间未操作，已退出登录')
+        void logout()
         return
       }
       handleWarningClosed()
@@ -203,6 +203,6 @@ export function useAutoLogout() {
 
   return {
     resetAutoLogoutTimer: resetTimers,
-    triggerLogout: logout,
+    triggerLogout: () => logout(),
   }
 }
