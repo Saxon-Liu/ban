@@ -27,6 +27,7 @@
               :min="0"
               :max="31"
               :step="1"
+              :disabled="isConfigSaving(row.month)"
               @change="handleConfigChange(row)"
               style="width: 120px"
             />
@@ -60,6 +61,7 @@ import { repositories } from "@/repositories";
 // 响应式数据
 const configs = ref<ExtraRestConfig[]>([]);
 const loading = ref(false);
+const savingMonths = ref<Set<number>>(new Set());
 const selectedYear = ref(new Date().getFullYear());
 const selectedYearValue = computed({
   get: () => String(selectedYear.value),
@@ -116,6 +118,8 @@ const loadConfigs = async () => {
  * 处理配置变更
  */
 const handleConfigChange = async (config: ExtraRestConfig) => {
+  if (savingMonths.value.has(config.month)) return;
+  savingMonths.value = new Set(savingMonths.value).add(config.month);
   try {
     if (config.id) {
       // 更新现有配置
@@ -138,8 +142,14 @@ const handleConfigChange = async (config: ExtraRestConfig) => {
     ElMessage.error("保存配置失败");
     // 重新加载数据以恢复原值
     await loadConfigs();
+  } finally {
+    const nextSavingMonths = new Set(savingMonths.value);
+    nextSavingMonths.delete(config.month);
+    savingMonths.value = nextSavingMonths;
   }
 };
+
+const isConfigSaving = (month: number) => savingMonths.value.has(month);
 
 // 页面加载时初始化数据
 onMounted(() => {
