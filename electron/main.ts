@@ -313,6 +313,64 @@ class AppManager {
         files: logFiles.map((file) => file.name),
       }
     })
+    ipcMain.handle(
+      'saveTextFile',
+      async (
+        _event,
+        defaultFileName: string,
+        content: string,
+        filters: Array<{ name: string; extensions: string[] }> = [
+          { name: '文本文件', extensions: ['txt'] },
+          { name: '所有文件', extensions: ['*'] },
+        ]
+      ) => {
+        const result = await dialog.showSaveDialog(this.mainWindow!, {
+          title: '保存文件',
+          defaultPath: defaultFileName,
+          filters,
+        })
+
+        if (result.canceled || !result.filePath) {
+          return { success: false, canceled: true }
+        }
+
+        await fsp.writeFile(result.filePath, content, 'utf8')
+        return {
+          success: true,
+          canceled: false,
+          filePath: result.filePath,
+        }
+      }
+    )
+    ipcMain.handle(
+      'saveBinaryFile',
+      async (
+        _event,
+        defaultFileName: string,
+        bytes: number[],
+        filters: Array<{ name: string; extensions: string[] }> = [
+          { name: '二进制文件', extensions: ['bin'] },
+          { name: '所有文件', extensions: ['*'] },
+        ]
+      ) => {
+        const result = await dialog.showSaveDialog(this.mainWindow!, {
+          title: '保存文件',
+          defaultPath: defaultFileName,
+          filters,
+        })
+
+        if (result.canceled || !result.filePath) {
+          return { success: false, canceled: true }
+        }
+
+        await fsp.writeFile(result.filePath, Buffer.from(bytes))
+        return {
+          success: true,
+          canceled: false,
+          filePath: result.filePath,
+        }
+      }
+    )
   }
 
   private setupSecurity() {

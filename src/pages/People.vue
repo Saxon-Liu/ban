@@ -15,11 +15,21 @@
             >
               新增人员
             </el-button>
-            <el-button @click="handleImportPeople" :icon="Upload">
+            <el-button
+              @click="handleImportPeople"
+              :icon="Upload"
+              :loading="importingPeople"
+              :disabled="exportingPeople"
+            >
 
               导入
             </el-button>
-            <el-button @click="handleExportPeople" :icon="Download">
+            <el-button
+              @click="handleExportPeople"
+              :icon="Download"
+              :loading="exportingPeople"
+              :disabled="importingPeople"
+            >
               导出
             </el-button>
           </div>
@@ -78,10 +88,22 @@
         </el-table-column>
         <el-table-column label="操作" width="180" fixed="right">
           <template #default="{ row }">
-            <el-button type="primary" size="small" @click="handleEdit(row)" :icon="Edit">
+            <el-button
+              type="primary"
+              size="small"
+              @click="handleEdit(row)"
+              :icon="Edit"
+              :disabled="isPersonDeleting(row.id)"
+            >
               编辑
             </el-button>
-            <el-button type="danger" size="small" @click="handleDelete(row)" :icon="Delete">
+            <el-button
+              type="danger"
+              size="small"
+              @click="handleDelete(row)"
+              :icon="Delete"
+              :disabled="isPersonDeleting(row.id)"
+            >
               删除
             </el-button>
           </template>
@@ -102,6 +124,9 @@
       v-model="showAddDialog"
       :title="editingPerson ? '编辑人员' : '新增人员'"
       width="400px"
+      :close-on-click-modal="!submittingPerson"
+      :close-on-press-escape="!submittingPerson"
+      :show-close="!submittingPerson"
     >
       <el-form
         :model="personForm"
@@ -132,8 +157,12 @@
         </el-form-item>
       </el-form>
       <template #footer>
-        <el-button @click="showAddDialog = false">取消</el-button>
-        <el-button type="primary" @click="handleSubmit">确定</el-button>
+        <el-button @click="showAddDialog = false" :disabled="submittingPerson">
+          取消
+        </el-button>
+        <el-button type="primary" :loading="submittingPerson" @click="handleSubmit">
+          确定
+        </el-button>
       </template>
     </el-dialog>
   </div>
@@ -183,10 +212,14 @@ const buildDeleteConfirmMessage = (
 // 响应式数据
 const people = ref<PersonWithStatistics[]>([]);
 const loading = ref(false);
+const submittingPerson = ref(false);
+const exportingPeople = ref(false);
+const importingPeople = ref(false);
 const showAddDialog = ref(false);
 const editingPerson = ref<Person | null>(null);
 const personFormRef = ref();
 const importFileRef = ref<HTMLInputElement | null>(null);
+const deletingPersonMap = reactive<Record<string, boolean>>({});
 let sortableInstance: Sortable | null = null;
 
 // 表单数据
@@ -275,37 +308,63 @@ const handleEdit = (person: PersonWithStatistics) => {
  * 删除人员
  */
 const handleDelete = async (person: PersonWithStatistics) => {
+  if (deletingPersonMap[person.id]) return;
+  deletingPersonMap[person.id] = true;
+  let deleteError: unknown = null;
   try {
     // 检查是否有排班记录
     const hasSchedules = await repositories.people.hasScheduleRecords(
       person.id
     );
 
+    const confirmOptions = {
+      confirmButtonText: "确定",
+      cancelButtonText: "取消",
+      type: "warning" as const,
+      dangerouslyUseHTMLString: true,
+      beforeClose: async (
+        action: string,
+        instance: { confirmButtonLoading: boolean; confirmButtonText: string },
+        done: () => void
+      ) => {
+        if (action !== "confirm") {
+          done();
+          return;
+        }
+
+        const previousText = instance.confirmButtonText;
+        instance.confirmButtonLoading = true;
+        instance.confirmButtonText = "删除中...";
+        try {
+          await repositories.people.delete(person.id);
+        } catch (error) {
+          deleteError = error;
+        } finally {
+          instance.confirmButtonLoading = false;
+          instance.confirmButtonText = previousText;
+          done();
+        }
+      },
+    };
+
     if (hasSchedules) {
       await ElMessageBox.confirm(
         buildDeleteConfirmMessage(person.name, true),
         "确认删除",
-        {
-          confirmButtonText: "确定",
-          cancelButtonText: "取消",
-          type: "warning",
-          dangerouslyUseHTMLString: true,
-        }
+        confirmOptions
       );
     } else {
       await ElMessageBox.confirm(
         buildDeleteConfirmMessage(person.name, false),
         "确认删除",
-        {
-          confirmButtonText: "确定",
-          cancelButtonText: "取消",
-          type: "warning",
-          dangerouslyUseHTMLString: true,
-        }
+        confirmOptions
       );
     }
 
-    await repositories.people.delete(person.id);
+    if (deleteError) {
+      throw deleteError;
+    }
+
     ElMessage.success("删除成功");
     await loadPeople();
   } catch (error) {
@@ -313,6 +372,8 @@ const handleDelete = async (person: PersonWithStatistics) => {
       console.error("删除人员失败:", error);
       ElMessage.error("删除失败");
     }
+  } finally {
+    deletingPersonMap[person.id] = false;
   }
 };
 
@@ -320,6 +381,8 @@ const handleDelete = async (person: PersonWithStatistics) => {
  * 提交表单
  */
 const handleSubmit = async () => {
+  if (submittingPerson.value) return;
+  submittingPerson.value = true;
   try {
     await personFormRef.value.validate();
 
@@ -348,6 +411,8 @@ const handleSubmit = async () => {
   } catch (error) {
     console.error("保存人员失败:", error);
     ElMessage.error("保存失败");
+  } finally {
+    submittingPerson.value = false;
   }
 };
 
@@ -418,6 +483,8 @@ onBeforeUnmount(() => {
 });
 
 const handleExportPeople = async () => {
+  if (exportingPeople.value) return;
+  exportingPeople.value = true;
   try {
     const list = await repositories.people.getAll();
     let fileName = '人员模板'
@@ -437,8 +504,14 @@ const handleExportPeople = async () => {
     const blob = new Blob([buffer], {
       type: "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
     });
-    excelExportService.downloadExcel(blob, `${fileName}.xlsx`);
-    ElMessage.success("导出成功");
+    const result = await excelExportService.downloadExcel(
+      blob,
+      `${fileName}.xlsx`
+    );
+    if (!result.saved) {
+      return;
+    }
+    ElMessage.success(result.filePath ? `已导出到 ${result.filePath}` : "导出成功");
   } catch (error: any) {
     console.error("[people-export-error]", {
       time: new Date().toISOString(),
@@ -447,10 +520,13 @@ const handleExportPeople = async () => {
       stack: error?.stack,
     });
     ElMessage.error("导出失败");
+  } finally {
+    exportingPeople.value = false;
   }
 };
 
 const handleImportPeople = () => {
+  if (importingPeople.value) return;
   try {
     importFileRef.value?.click();
   } catch (error: any) {
@@ -467,6 +543,7 @@ const handleImportFileChange = async (e: Event) => {
   const target = e.target as HTMLInputElement;
   const file = target.files?.[0];
   if (!file) return;
+  importingPeople.value = true;
   try {
     const existingPeople = await repositories.people.getAll();
     const existingNameSet = new Set(
@@ -583,9 +660,12 @@ const handleImportFileChange = async (e: Event) => {
     });
     ElMessage.error("导入失败");
   } finally {
+    importingPeople.value = false;
     if (importFileRef.value) importFileRef.value.value = "";
   }
 };
+
+const isPersonDeleting = (id: string) => deletingPersonMap[id] === true;
 </script>
 
 <style lang="scss" scoped>

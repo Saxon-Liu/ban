@@ -11,7 +11,7 @@ const logger = {
   },
 }
 
-const WHITELISTED_CHANNELS = ['getAppContext', 'getVersion', 'exportLog'] as const
+const WHITELISTED_CHANNELS = ['getAppContext', 'getVersion', 'exportLog', 'saveTextFile', 'saveBinaryFile'] as const
 type WhitelistedChannel = (typeof WHITELISTED_CHANNELS)[number]
 
 function validateChannel(channel: string): asserts channel is WhitelistedChannel {
@@ -51,6 +51,22 @@ const electronAPI = {
   getAppContext: withErrorHandling('getAppContext', () => safeInvoke('getAppContext')),
   getVersion: withErrorHandling('getVersion', () => safeInvoke('getVersion')),
   exportLog: withErrorHandling('exportLog', () => safeInvoke('exportLog')),
+  saveTextFile: withErrorHandling(
+    'saveTextFile',
+    (
+      defaultFileName: string,
+      content: string,
+      filters?: Array<{ name: string; extensions: string[] }>
+    ) => safeInvoke('saveTextFile', defaultFileName, content, filters)
+  ),
+  saveBinaryFile: withErrorHandling(
+    'saveBinaryFile',
+    (
+      defaultFileName: string,
+      bytes: number[],
+      filters?: Array<{ name: string; extensions: string[] }>
+    ) => safeInvoke('saveBinaryFile', defaultFileName, bytes, filters)
+  ),
   onThemeChange: (callback: (theme: 'dark' | 'light') => void) => {
     const mediaQuery = window.matchMedia('(prefers-color-scheme: dark)')
     const handler = (event: MediaQueryListEvent) => {

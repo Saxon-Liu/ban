@@ -59,8 +59,10 @@
 <script setup lang="ts">
 import { ref, computed, onMounted, onBeforeUnmount, watch } from 'vue'
 import { useRoute } from 'vue-router'
+import { ElMessage } from 'element-plus'
 import { Calendar, Tools, Fold, Expand, SwitchButton } from '@element-plus/icons-vue'
 import { useAutoLogout } from '@/composables/useAutoLogout'
+import { consumeReloadSuccessNotice } from '@/utils'
 
 const route = useRoute()
 
@@ -93,6 +95,10 @@ const applyTheme = () => {
 }
 
 onMounted(() => {
+  const reloadNotice = consumeReloadSuccessNotice()
+  if (reloadNotice) {
+    ElMessage.success(reloadNotice)
+  }
   try {
     const saved = localStorage.getItem(THEME_KEY) as 'system' | 'light' | 'dark' | null
     themeMode.value = saved || 'system'
