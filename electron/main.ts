@@ -11,6 +11,9 @@ const { app, BrowserWindow, dialog, ipcMain, Menu, session } = electron
 
 const APP_NAME = '班'
 const APP_ID = 'com.paiban.electron'
+const AUTH_STORAGE_KEY = 'auth-token'
+const AUTH_EXPIRY_KEY = 'auth-expiry'
+const AUTH_SESSION_VERSION_KEY = 'auth-session-version'
 
 if (app.getName() !== APP_NAME) {
   app.setName(APP_NAME)
@@ -22,6 +25,7 @@ if (process.platform === 'win32') {
 class AppManager {
   private mainWindow: InstanceType<typeof BrowserWindow> | null = null
   private securityInitialized = false
+  private isClearingAuthSessionOnClose = false
   private readonly appContext = {
     userName: '本地用户',
     roles: ['user'],
@@ -188,8 +192,18 @@ class AppManager {
       })
     })
 
+    this.mainWindow.on('close', (event) => {
+      if (this.isClearingAuthSessionOnClose) {
+        return
+      }
+
+      event.preventDefault()
+      void this.clearAuthSessionAndCloseWindow()
+    })
+
     this.mainWindow.on('closed', () => {
       this.mainWindow = null
+      this.isClearingAuthSessionOnClose = false
     })
 
     const rendererEntry = this.getRendererEntry()
@@ -250,6 +264,37 @@ class AppManager {
         })
       }
     )
+  }
+
+  private async clearAuthSessionAndCloseWindow() {
+    if (!this.mainWindow || this.mainWindow.isDestroyed() || this.isClearingAuthSessionOnClose) {
+      return
+    }
+
+    this.isClearingAuthSessionOnClose = true
+
+    try {
+      await this.mainWindow.webContents.executeJavaScript(
+        `
+          try {
+            localStorage.removeItem(${JSON.stringify(AUTH_STORAGE_KEY)});
+            localStorage.removeItem(${JSON.stringify(AUTH_EXPIRY_KEY)});
+            localStorage.removeItem(${JSON.stringify(AUTH_SESSION_VERSION_KEY)});
+          } catch {}
+        `,
+        true
+      )
+    } catch (error) {
+      errorLogger.error('关闭应用时清理登录态失败', {
+        message: (error as Error)?.message,
+        stack: (error as Error)?.stack,
+      })
+    } finally {
+      const targetWindow = this.mainWindow
+      if (targetWindow && !targetWindow.isDestroyed()) {
+        targetWindow.destroy()
+      }
+    }
   }
 
   private setupIPC() {
