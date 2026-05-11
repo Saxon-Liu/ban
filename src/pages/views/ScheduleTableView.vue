@@ -20,11 +20,23 @@
     <div class="schedule-container">
       <!-- 左侧人员列表 -->
       <div class="people-sidebar">
-        <h3>人员列表</h3>
+        <div class="people-sidebar-header">
+          <h3>人员列表</h3>
+          <el-input
+            v-model="peopleSearch"
+            size="small"
+            clearable
+            placeholder="搜索"
+            class="people-search-input"
+          />
+        </div>
         <div class="people-list">
           <el-scrollbar>
+            <div v-if="filteredPeopleWithStats.length === 0" class="people-empty">
+              {{ peopleSearch.trim() ? "未找到匹配人员" : "暂无人员数据" }}
+            </div>
             <div
-              v-for="person in peopleWithStats"
+              v-for="person in filteredPeopleWithStats"
               :key="person.id"
               class="person-tag"
               :draggable="true"
@@ -105,7 +117,7 @@
           <el-table-column
             v-for="shift in visibleShifts"
             :key="shift.id"
-            :label="shift.name"
+            :label="getShiftDisplayName(shift.id)"
             min-width="150"
           >
             <template #default="{ row }">
@@ -215,7 +227,7 @@
                         {{ getPersonName(personId) }}
                       </span>
                       <span v-if="isPersonArchived(personId)" class="archived-badge">
-                        已归档
+                        已删除
                       </span>
                     </el-tag>
                   </template>
@@ -314,6 +326,7 @@ import {
   getAdaptiveTextColor,
   getMonthDates,
   formatDate,
+  getIdDisplaySuffix,
   sortByOrder,
 } from "@/utils";
 
@@ -353,6 +366,7 @@ const selectedDate = ref("");
 const selectedShiftId = ref("");
 const extraRestDaysForCurrentMonth = ref(0);
 const holidayDateMap = ref<Map<string, EffectiveHolidayEntry>>(new Map());
+const peopleSearch = ref("");
 
 const dragState = ref<{
   active: boolean;
@@ -383,12 +397,53 @@ const peopleWithStats = computed(() => {
   });
 });
 
+const filteredPeopleWithStats = computed(() => {
+  const keyword = peopleSearch.value.trim().toLowerCase();
+  if (!keyword) return peopleWithStats.value;
+
+  return peopleWithStats.value.filter((person) => {
+    const displayName = getPersonName(person.id).toLowerCase();
+    const rawName = person.name.toLowerCase();
+    return displayName.includes(keyword) || rawName.includes(keyword);
+  });
+});
+
+const personNameDuplicateMap = computed(() => {
+  const counts = new Map<string, number>();
+  people.value
+    .filter((person) => !person.archivedAt)
+    .forEach((person) => {
+    const key = person.name.trim();
+    counts.set(key, (counts.get(key) || 0) + 1);
+    });
+  return counts;
+});
+
 const monthDates = computed(() => {
   if (!currentMonth.value) return [];
   return getMonthDates(currentMonth.value);
 });
 
 const restShiftId = computed(() => getRestShiftId(shifts.value));
+
+const shiftNameDuplicateMap = computed(() => {
+  const counts = new Map<string, number>();
+  shifts.value
+    .filter((shift) => !shift.archivedAt)
+    .forEach((shift) => {
+    const key = shift.name.trim();
+    counts.set(key, (counts.get(key) || 0) + 1);
+    });
+  return counts;
+});
+
+const getShiftDisplayName = (shiftId: string) => {
+  const shift = shiftMap.value.get(shiftId);
+  if (!shift) return "未知班次";
+  const duplicateCount = shiftNameDuplicateMap.value.get(shift.name.trim()) || 0;
+  if (duplicateCount <= 1) return shift.name;
+  return `${shift.name} (${getIdDisplaySuffix(shift.id)})`;
+};
 
 const scheduleCellMap = computed(() => {
   const map = new Map<string, Schedule[]>();
@@ -652,7 +707,7 @@ const handleCellDrop = async (
     const dragData: DragData = JSON.parse(dragDataStr);
     const targetIndex = dragState.value.targetIndex ?? -1;
     if (isShiftArchived(shiftId)) {
-      ElMessage.warning("该班次已归档，仅保留历史排班，不可继续排班");
+      ElMessage.warning("该班次已删除，仅保留历史排班，不可继续排班");
       handleDragEnd();
       return;
     }
@@ -943,7 +998,10 @@ const getPersonColor = (personId: string) => {
  */
 const getPersonName = (personId: string) => {
   const person = personMap.value.get(personId);
-  return person?.name || "未知";
+  if (!person) return "未知";
+  const duplicateCount = personNameDuplicateMap.value.get(person.name.trim()) || 0;
+  if (duplicateCount <= 1) return person.name;
+  return `${person.name} (${getIdDisplaySuffix(person.id)})`;
 };
 
 
@@ -951,8 +1009,7 @@ const getPersonName = (personId: string) => {
  * 获取班次名称
  */
 const getShiftName = (shiftId: string) => {
-  const shift = shiftMap.value.get(shiftId);
-  return shift?.name || "未知班次";
+  return getShiftDisplayName(shiftId);
 };
 
 /**
@@ -1017,14 +1074,36 @@ defineExpose({
     padding: 20px;
     box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
 
-    h3 {
-      margin: 0 0 15px 0;
-      color: var(--el-text-color-primary);
+    .people-sidebar-header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 15px;
+      white-space: nowrap;
+
+      h3 {
+        margin: 0;
+        color: var(--el-text-color-primary);
+        flex: 0 0 auto;
+      }
+    }
+
+    .people-search-input {
+      flex: 1;
+      min-width: 0;
     }
 
     .people-list {
       width: calc(100% + 10px);
-      height: calc(100% - 30px);
+      height: calc(100% - 47px);
+
+      .people-empty {
+        margin-right: 10px;
+        padding: 24px 12px;
+        text-align: center;
+        color: var(--el-text-color-secondary);
+        font-size: 13px;
+      }
 
       .person-tag {
         display: flex;
