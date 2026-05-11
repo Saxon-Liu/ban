@@ -31,6 +31,7 @@ export interface ScheduleRepository extends BaseRepository<Schedule> {
 
   /**
    * 根据人员和日期获取排班记录
+   * 业务上同一人员同一天只允许一条排班，因此返回单条记录
    * @param personId - 人员ID
    * @param date - 日期（YYYY-MM-DD格式）
    */

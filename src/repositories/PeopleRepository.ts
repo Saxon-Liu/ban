@@ -42,6 +42,7 @@ export interface PeopleRepository extends BaseRepository<Person> {
 
   /**
    * 检查人员姓名是否已存在
+   * 只检查未删除人员；已删除同名人员不阻止重新新增
    * @param name - 人员姓名
    * @param excludeId - 排除的人员ID（更新时用于排除自身）
    */
