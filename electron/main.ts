@@ -300,6 +300,10 @@ class AppManager {
   private setupIPC() {
     ipcMain.handle('getAppContext', async () => this.appContext)
     ipcMain.handle('getVersion', async () => app.getVersion())
+    ipcMain.handle('logRenderer', async (_event, payload) => {
+      errorLogger.error('渲染进程错误', payload)
+      return { success: true }
+    })
     ipcMain.handle('exportLog', async () => {
       const result = await dialog.showSaveDialog(this.mainWindow!, {
         title: '导出日志',
