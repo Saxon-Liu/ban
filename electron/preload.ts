@@ -1,13 +1,65 @@
 import electron from 'electron'
 
 const { contextBridge, ipcRenderer } = electron
+const originalConsoleError = console.error.bind(console)
+
+function serializeForLog(value: unknown, seen = new WeakSet<object>()): unknown {
+  if (value === null || value === undefined) return value
+  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
+    return value
+  }
+  if (value instanceof Error) {
+    return {
+      name: value.name,
+      message: value.message,
+      stack: value.stack,
+    }
+  }
+  if (value instanceof Date) {
+    return value.toISOString()
+  }
+  if (typeof value === 'function') {
+    return `[Function ${value.name || 'anonymous'}]`
+  }
+  if (typeof value === 'object') {
+    if (seen.has(value)) return '[Circular]'
+    seen.add(value)
+
+    if (Array.isArray(value)) {
+      return value.map((item) => serializeForLog(item, seen))
+    }
+
+    const plainObject: Record<string, unknown> = {}
+    for (const key of Object.keys(value)) {
+      plainObject[key] = serializeForLog((value as Record<string, unknown>)[key], seen)
+    }
+    return plainObject
+  }
+
+  return String(value)
+}
+
+function sendRendererError(source: string, message: string, data?: unknown) {
+  void ipcRenderer
+    .invoke('logRenderer', {
+      source,
+      message,
+      data: serializeForLog(data),
+      url: window.location.href,
+      userAgent: navigator.userAgent,
+      time: new Date().toISOString(),
+    })
+    .catch((error) => {
+      originalConsoleError('[renderer-log-forward-error]', error)
+    })
+}
 
 const logger = {
   info: (message: string, data?: unknown) => {
     console.log(`[${new Date().toISOString()}] [INFO] ${message}`, data ? JSON.stringify(data) : '')
   },
   error: (message: string, error?: unknown) => {
-    console.error(`[${new Date().toISOString()}] [ERROR] ${message}`, error)
+    originalConsoleError(`[${new Date().toISOString()}] [ERROR] ${message}`, error)
   },
 }
 
@@ -92,20 +144,29 @@ if (process.contextIsolated) {
 }
 
 window.addEventListener('error', (event) => {
-  logger.error('页面错误', {
+  const details = {
     message: event.message,
     filename: event.filename,
     lineno: event.lineno,
     colno: event.colno,
     error: event.error,
-  })
+  }
+  logger.error('页面错误', details)
+  sendRendererError('window-error', event.message || '页面错误', details)
 })
 
 window.addEventListener('unhandledrejection', (event) => {
-  logger.error('未处理的Promise拒绝', {
+  const details = {
     reason: event.reason,
     promise: event.promise,
-  })
+  }
+  logger.error('未处理的Promise拒绝', details)
+  sendRendererError('unhandledrejection', '未处理的Promise拒绝', details)
 })
+
+console.error = (...args: unknown[]) => {
+  originalConsoleError(...args)
+  sendRendererError('console-error', String(args[0] || 'console.error'), args)
+}
 
 logger.info('预加载脚本加载完成')
