@@ -301,7 +301,14 @@ class AppManager {
     ipcMain.handle('getAppContext', async () => this.appContext)
     ipcMain.handle('getVersion', async () => app.getVersion())
     ipcMain.handle('logRenderer', async (_event, payload) => {
-      errorLogger.error('渲染进程错误', payload)
+      const level = payload?.level === 'info' || payload?.level === 'warn' ? payload.level : 'error'
+      if (level === 'info') {
+        appLogger.info('渲染进程日志', payload)
+      } else if (level === 'warn') {
+        appLogger.warn('渲染进程日志', payload)
+      } else {
+        errorLogger.error('渲染进程日志', payload)
+      }
       return { success: true }
     })
     ipcMain.handle('exportLog', async () => {

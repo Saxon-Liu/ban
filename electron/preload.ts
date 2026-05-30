@@ -2,6 +2,8 @@ import electron from 'electron'
 
 const { contextBridge, ipcRenderer } = electron
 const originalConsoleError = console.error.bind(console)
+const originalConsoleInfo = console.info.bind(console)
+const originalConsoleWarn = console.warn.bind(console)
 
 function serializeForLog(value: unknown, seen = new WeakSet<object>()): unknown {
   if (value === null || value === undefined) return value
@@ -39,9 +41,10 @@ function serializeForLog(value: unknown, seen = new WeakSet<object>()): unknown 
   return String(value)
 }
 
-function sendRendererError(source: string, message: string, data?: unknown) {
+function sendRendererLog(level: 'info' | 'warn' | 'error', source: string, message: string, data?: unknown) {
   void ipcRenderer
     .invoke('logRenderer', {
+      level,
       source,
       message,
       data: serializeForLog(data),
@@ -52,6 +55,10 @@ function sendRendererError(source: string, message: string, data?: unknown) {
     .catch((error) => {
       originalConsoleError('[renderer-log-forward-error]', error)
     })
+}
+
+function sendRendererError(source: string, message: string, data?: unknown) {
+  sendRendererLog('error', source, message, data)
 }
 
 const logger = {
@@ -167,6 +174,16 @@ window.addEventListener('unhandledrejection', (event) => {
 console.error = (...args: unknown[]) => {
   originalConsoleError(...args)
   sendRendererError('console-error', String(args[0] || 'console.error'), args)
+}
+
+console.info = (...args: unknown[]) => {
+  originalConsoleInfo(...args)
+  sendRendererLog('info', 'console-info', String(args[0] || 'console.info'), args)
+}
+
+console.warn = (...args: unknown[]) => {
+  originalConsoleWarn(...args)
+  sendRendererLog('warn', 'console-warn', String(args[0] || 'console.warn'), args)
 }
 
 logger.info('预加载脚本加载完成')
