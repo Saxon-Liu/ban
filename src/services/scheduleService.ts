@@ -31,6 +31,22 @@ interface ReorderCellSchedulesParams {
   schedules: Schedule[]
 }
 
+interface MoveScheduleToCellParams {
+  personId: string
+  sourceDate: string
+  sourceShiftId: string
+  targetDate: string
+  targetShiftId: string
+  month: string
+  targetIndex: number
+}
+
+export interface MoveScheduleToCellResult {
+  movedSchedule: Schedule
+  updatedSchedules: Schedule[]
+  deletedIds: string[]
+}
+
 interface TransferCellSchedulesParams {
   /** 来源日期 */
   sourceDate: string
@@ -53,6 +69,7 @@ export interface TransferCellSchedulesResult {
   createdCount: number
   /** 因同一人员目标日期已有排班而跳过的数量 */
   conflictCount: number
+  skippedPersonIds: string[]
   createdSchedules: Schedule[]
   updatedSchedules: Schedule[]
   deletedIds: string[]
@@ -189,34 +206,35 @@ export class ScheduleService {
       updatedAt: new Date(),
     })
 
-    const created = await repositories.schedules.create({
+    const now = getCurrentDateTime()
+    const created: Schedule = {
+      id: generateId(),
       personId,
       shiftId,
       date,
       month,
       order: targetIndex + 1,
-    })
+      createdAt: now,
+      updatedAt: now,
+    }
 
-    const updates = nextOrderSchedules
+    const updated = nextOrderSchedules
       .map((schedule, index) => ({
-        id: schedule.id,
-        data: { order: index + 1 },
+        ...schedule,
+        order: index + 1,
+        updatedAt: now,
       }))
-      .filter((item) => item.id)
+      .filter((schedule) => schedule.id)
+    const db = await dbManager.getDB()
+    const tx = db.transaction('schedules', 'readwrite')
+    const store = tx.store
 
-    if (updates.length === 0) {
-      return { created, updated: [] }
+    store.add(created)
+    for (const schedule of updated) {
+      store.put(schedule)
     }
+    await tx.done
 
-    if (repositories.schedules.batchUpdate) {
-      const updated = await repositories.schedules.batchUpdate(updates)
-      return { created, updated }
-    }
-
-    const updated: Schedule[] = []
-    for (const update of updates) {
-      updated.push(await repositories.schedules.update(update.id, update.data))
-    }
     return { created, updated }
   }
 
@@ -251,6 +269,88 @@ export class ScheduleService {
   }
 
   /** 复制或移动整个单元格的排班到另一个日期+班次单元格 */
+  async moveScheduleToCell(params: MoveScheduleToCellParams): Promise<MoveScheduleToCellResult> {
+    const {
+      personId,
+      sourceDate,
+      sourceShiftId,
+      targetDate,
+      targetShiftId,
+      month,
+      targetIndex,
+    } = params
+
+    await assertActiveSchedulingEntities(personId, sourceShiftId)
+    await assertActiveSchedulingEntities(personId, targetShiftId)
+
+    const now = getCurrentDateTime()
+    const [sourceDateSchedules, targetDateSchedules] = await Promise.all([
+      repositories.schedules.getByDate(sourceDate),
+      sourceDate === targetDate ? Promise.resolve([] as Schedule[]) : repositories.schedules.getByDate(targetDate),
+    ])
+    const effectiveTargetDateSchedules = sourceDate === targetDate ? sourceDateSchedules : targetDateSchedules
+    const sourceSchedule = sourceDateSchedules.find(
+      (schedule) =>
+        schedule.personId === personId &&
+        schedule.date === sourceDate &&
+        schedule.shiftId === sourceShiftId
+    )
+
+    if (!sourceSchedule) {
+      throw new Error('排班记录不存在，请刷新后重试')
+    }
+
+    const existingTargetSchedule = effectiveTargetDateSchedules.find(
+      (schedule) => schedule.personId === personId && schedule.id !== sourceSchedule.id
+    )
+    if (existingTargetSchedule) {
+      throw new Error('该员工当天已有排班，请先删除原有排班')
+    }
+
+    const targetCellSchedules = getSchedulesForCell(
+      effectiveTargetDateSchedules.filter((schedule) => schedule.id !== sourceSchedule.id),
+      targetDate,
+      targetShiftId
+    )
+    const insertIndex =
+      targetIndex >= 0
+        ? Math.min(targetIndex, targetCellSchedules.length)
+        : targetCellSchedules.length
+    const movedSchedule: Schedule = {
+      ...sourceSchedule,
+      shiftId: targetShiftId,
+      date: targetDate,
+      month,
+      order: insertIndex + 1,
+      updatedAt: now,
+    }
+    const reorderedTargetCell = [...targetCellSchedules]
+    reorderedTargetCell.splice(insertIndex, 0, movedSchedule)
+
+    const updatedSchedules = reorderedTargetCell.map((schedule, index) => ({
+      ...schedule,
+      order: index + 1,
+      updatedAt: now,
+    }))
+    const persistedMovedSchedule =
+      updatedSchedules.find((schedule) => schedule.id === sourceSchedule.id) || movedSchedule
+    const db = await dbManager.getDB()
+    const tx = db.transaction('schedules', 'readwrite')
+    const store = tx.store
+
+    for (const schedule of updatedSchedules) {
+      store.put(schedule)
+    }
+
+    await tx.done
+
+    return {
+      movedSchedule: persistedMovedSchedule,
+      updatedSchedules,
+      deletedIds: [],
+    }
+  }
+
   async transferCellSchedules(params: TransferCellSchedulesParams): Promise<TransferCellSchedulesResult> {
     const {
       sourceDate,
@@ -264,7 +364,18 @@ export class ScheduleService {
 
     const sourceSchedules = getSchedulesForCell(schedules, sourceDate, sourceShiftId)
     if (sourceSchedules.length === 0) {
-      return { createdCount: 0, conflictCount: 0, createdSchedules: [], updatedSchedules: [], deletedIds: [] }
+      return {
+        createdCount: 0,
+        conflictCount: 0,
+        skippedPersonIds: [],
+        createdSchedules: [],
+        updatedSchedules: [],
+        deletedIds: [],
+      }
+    }
+
+    if (mode === 'copy' && sourceDate === targetDate) {
+      throw new Error('同一天内不能复制整格排班，请使用移动调整班次')
     }
 
     const sourceShift = await repositories.shifts.getById(sourceShiftId)
@@ -308,6 +419,7 @@ export class ScheduleService {
     const createdSchedules: Schedule[] = []
     const updatedSchedules: Schedule[] = []
     const deletedIds: string[] = []
+    const skippedPersonIds: string[] = []
     let conflictCount = 0
     const pendingAdds: Schedule[] = []
     const pendingUpdates: Schedule[] = []
@@ -323,10 +435,13 @@ export class ScheduleService {
 
       if (existingTargetSchedule && !canReuseSameDaySchedule) {
         conflictCount++
+        skippedPersonIds.push(source.personId)
         continue
       }
 
       if (targetPersonIds.has(source.personId)) {
+        conflictCount++
+        skippedPersonIds.push(source.personId)
         continue
       }
 
@@ -387,8 +502,9 @@ export class ScheduleService {
     await tx.done
 
     return {
-      createdCount: createdSchedules.length,
+      createdCount: createdSchedules.length + updatedSchedules.length,
       conflictCount,
+      skippedPersonIds,
       createdSchedules,
       updatedSchedules,
       deletedIds,
