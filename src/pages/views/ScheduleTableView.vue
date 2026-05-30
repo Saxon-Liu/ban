@@ -326,7 +326,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, computed, toRef, watch } from "vue";
+import { ref, onMounted, onBeforeUnmount, computed, toRef, watch } from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { Rank } from "@element-plus/icons-vue";
 import type {
@@ -390,6 +390,8 @@ const extraRestDaysForCurrentMonth = ref(0);
 const holidayDateMap = ref<Map<string, EffectiveHolidayEntry>>(new Map());
 const peopleSearch = ref("");
 const removingScheduleKeys = ref<Set<string>>(new Set());
+const schedulingBusy = ref(false);
+let dragOverFrame = 0;
 
 const dragState = ref<{
   active: boolean;
@@ -658,6 +660,10 @@ const handleCellDragOver = (
   shiftId: string
 ) => {
   event.preventDefault();
+  if (dragOverFrame) return;
+  dragOverFrame = window.requestAnimationFrame(() => {
+    dragOverFrame = 0;
+  });
 
   dragState.value.targetDate = date;
   dragState.value.targetShiftId = shiftId;
@@ -740,6 +746,8 @@ const handleCellDrop = async (
 ) => {
   event.preventDefault();
   if (!event.dataTransfer) return;
+  if (schedulingBusy.value) return;
+  schedulingBusy.value = true;
 
   try {
     const dragDataStr = event.dataTransfer.getData("text/plain");
@@ -777,22 +785,57 @@ const handleCellDrop = async (
         }
       }
 
-      const sourceSchedule = schedules.value.find(
-        (s) =>
-          s.personId === dragData.personId &&
-          s.date === dragData.sourceDate &&
-          s.shiftId === dragData.sourceShiftId
-      );
-      if (sourceSchedule) {
-        const removed = await scheduleService.removeScheduleByIdentity(
-          dragData.personId,
-          dragData.sourceDate,
-          dragData.sourceShiftId
-        );
-        if (removed) {
-          removeSchedulesByIds([removed.id]);
+      const shift = shifts.value.find((s) => s.id === shiftId);
+      if (shift?.isRest) {
+        const person = people.value.find((p) => p.id === dragData.personId);
+        const monthValue = currentMonth.value;
+        if (!monthValue) {
+          ElMessage.warning("尚未选择月份，无法计算剩余休息天数");
+          handleDragEnd();
+          return;
+        }
+        if (person) {
+          const stats = calculatePersonStatistics(person.id, monthValue);
+          if (stats && stats.remainingRestDays <= 0) {
+            try {
+              await ElMessageBox.confirm(
+                `${person.name} 已超额排休 ${Math.abs(stats.remainingRestDays)} 天，确定要继续排休吗？`,
+                "超额排休提醒",
+                {
+                  confirmButtonText: "确定",
+                  cancelButtonText: "取消",
+                  type: "warning",
+                }
+              );
+            } catch {
+              handleDragEnd();
+              return;
+            }
+          }
         }
       }
+
+      const result = await scheduleService.moveScheduleToCell({
+        personId: dragData.personId,
+        sourceDate: dragData.sourceDate,
+        sourceShiftId: dragData.sourceShiftId,
+        targetDate: date,
+        targetShiftId: shiftId,
+        month: currentMonth.value!,
+        targetIndex,
+      });
+      replaceSchedules(result.updatedSchedules);
+      mergeSchedules(result.movedSchedule);
+      console.info("[schedule-move]", {
+        personId: dragData.personId,
+        sourceDate: dragData.sourceDate,
+        sourceShiftId: dragData.sourceShiftId,
+        targetDate: date,
+        targetShiftId: shiftId,
+      });
+      ElMessage.success("已移动排班");
+      handleDragEnd();
+      return;
     }
 
     if (
@@ -832,7 +875,11 @@ const handleCellDrop = async (
 
       if (result.createdCount === 0) {
         if (result.conflictCount > 0) {
-          ElMessage.warning(`操作失败：所有人员在目标日期已有排班`);
+          ElMessage.warning(
+            isCopy
+              ? "目标日期已有这些人员的排班，未复制"
+              : "目标日期已有这些人员的排班，未移动"
+          );
         }
         handleDragEnd();
         return;
@@ -841,9 +888,20 @@ const handleCellDrop = async (
       const actionName = isCopy ? "复制" : "移动";
       let msg = `${actionName}成功 ${result.createdCount} 人`;
       if (result.conflictCount > 0) {
-        msg += `，${result.conflictCount} 人因冲突跳过`;
+        msg += `，跳过 ${result.conflictCount} 人`;
       }
       ElMessage.success(msg);
+
+      console.info("[schedule-cell-transfer]", {
+        sourceDate,
+        sourceShiftId,
+        targetDate: date,
+        targetShiftId: shiftId,
+        mode: isCopy ? "copy" : "move",
+        createdCount: result.createdCount,
+        conflictCount: result.conflictCount,
+        skippedPersonIds: result.skippedPersonIds,
+      });
 
       removeSchedulesByIds(result.deletedIds);
       replaceSchedules(result.updatedSchedules);
@@ -915,9 +973,15 @@ const handleCellDrop = async (
 
     ElMessage.success("排班成功");
   } catch (error) {
-    console.error("排班失败:", error);
-    ElMessage.error("排班失败");
+    console.error("排班失败:", {
+      error,
+      time: new Date().toISOString(),
+      target: { date, shiftId },
+    });
+    ElMessage.error(error instanceof Error ? error.message : "排班失败");
+    await loadData();
   } finally {
+    schedulingBusy.value = false;
     handleDragEnd();
   }
 };
@@ -1087,6 +1151,13 @@ const removeSchedule = async (
 // 页面加载时初始化数据
 onMounted(() => {
   loadData();
+});
+
+onBeforeUnmount(() => {
+  if (dragOverFrame) {
+    window.cancelAnimationFrame(dragOverFrame);
+    dragOverFrame = 0;
+  }
 });
 
 watch(
