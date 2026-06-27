@@ -34,6 +34,19 @@ export function useScheduleViewData() {
     )
   })
 
+  const schedulesByPersonId = computed(() => {
+    const map = new Map<string, Schedule[]>()
+    for (const schedule of schedules.value) {
+      const personSchedules = map.get(schedule.personId)
+      if (personSchedules) {
+        personSchedules.push(schedule)
+      } else {
+        map.set(schedule.personId, [schedule])
+      }
+    }
+    return map
+  })
+
   const isPersonArchived = (personId: string) =>
     Boolean(personMap.value.get(personId)?.archivedAt)
 
@@ -66,7 +79,6 @@ export function useScheduleViewData() {
   return {
     activePeople,
     activeShifts,
-    isPersonArchived,
     isScheduleEditable,
     isShiftArchived,
     loading,
@@ -76,6 +88,7 @@ export function useScheduleViewData() {
     removeSchedulesByIds,
     replaceSchedules,
     schedules,
+    schedulesByPersonId,
     shiftMap,
     shifts,
     visibleShifts,

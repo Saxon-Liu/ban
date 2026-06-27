@@ -15,8 +15,30 @@ const DB_CONFIG = {
   /** 数据库名称 */
   NAME: "ScheduleManagementDB",
   /** 数据库版本 */
-  VERSION: 4,
+  VERSION: 5,
 } as const;
+
+type UpgradeObjectStore = {
+  indexNames: DOMStringList;
+  createIndex(
+    name: string,
+    keyPath: string | string[],
+    options?: IDBIndexParameters
+  ): unknown;
+};
+
+function ensureScheduleIndexes(store: UpgradeObjectStore) {
+  if (!store.indexNames.contains("by-personId-month")) {
+    store.createIndex("by-personId-month", ["personId", "month"]);
+  }
+
+  if (!store.indexNames.contains("by-personId-date")) {
+    // 旧版本数据库可能已经存在重复的“同人同日”脏数据。
+    // 这里补非唯一索引，避免升级时因 ConstraintError 导致整库无法打开；
+    // 新库仍在建表分支创建唯一索引，业务层也会继续做唯一性校验。
+    store.createIndex("by-personId-date", ["personId", "date"]);
+  }
+}
 
 /**
  * IndexedDB管理器类
@@ -86,11 +108,9 @@ export class IndexedDBManager {
           schedulesStore.createIndex("by-personId-date", ["personId", "date"], {
             unique: true,
           });
-        } else if (oldVersion < 3) {
+        } else if (oldVersion < 5) {
           const schedulesStore = transaction.objectStore("schedules");
-          if (!schedulesStore.indexNames.contains("by-personId-month")) {
-            schedulesStore.createIndex("by-personId-month", ["personId", "month"]);
-          }
+          ensureScheduleIndexes(schedulesStore);
         }
 
         // 额外休息配置表

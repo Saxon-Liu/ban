@@ -1,22 +1,5 @@
 <template>
   <div class="schedule-table-view">
-    <!-- <el-card>
-      <template #header>
-        <div class="page-header">
-          <span>排班管理</span>
-          <div class="header-actions">
-            <el-date-picker v-model="currentMonth" type="month" placeholder="选择月份" format="YYYY年MM月"
-                            value-format="YYYY-MM" @change="handleMonthChange" :editable="false" :clearable="false" />
-            <el-button type="primary" @click="exportToExcel">
-              <el-icon>
-                <Download />
-              </el-icon>
-              导出Excel
-            </el-button>
-          </div>
-        </div>
-      </template> -->
-
     <div class="schedule-container" v-loading="loading">
       <!-- 左侧人员列表 -->
       <div class="people-sidebar">
@@ -92,6 +75,7 @@
           border
           size="small"
           height="calc(100vh - 190px)"
+          :row-class-name="getScheduleRowClassName"
         >
           <el-table-column prop="date" label="日期" width="100" fixed>
             <template #default="{ row }">
@@ -127,136 +111,191 @@
             min-width="150"
           >
             <template #default="{ row }">
-              <!-- 占位 撑开call高度 -->
-              <el-space
-                wrap
-                style="opacity: 0; pointer-events: none; padding: 2px 0"
+              <template
+                v-for="cell in getScheduleCellViewList(
+                  row.date,
+                  row.weekdayName,
+                  shift.id
+                )"
+                :key="cell.key"
               >
-                <template
-                  v-for="personId in getSchedulePersonIds(row.date, shift.id)"
-                  :key="personId"
+                <!-- 占位撑开 cell 高度，使用轻量 DOM 避免重复渲染 el-tag -->
+                <div
+                  class="schedule-cell-spacer"
+                  :class="{
+                    'has-cell-side-rail':
+                      cell.canDrag || showCellTransferActions(cell.date, cell.shiftId),
+                  }"
                 >
-                  <el-tag class="schedule-tag" closable disable-transitions>
-                    <span>
-                      {{ getPersonName(personId) }}
+                  <span
+                    v-for="person in cell.people"
+                    :key="person.id"
+                    class="schedule-cell-spacer-tag"
+                  >
+                    {{ person.name }}
+                    <span v-if="person.archived" class="archived-badge">
+                      已删除
                     </span>
-                  </el-tag>
-                </template>
-              </el-space>
-              <!-- 占满整个cell -->
-              <div
-                class="schedule-cell"
-                :class="{
-                  'drag-over':
-                    dragState.active &&
-                    dragState.targetDate === row.date &&
-                    dragState.targetShiftId === shift.id,
-                }"
-                :data-date="row.date"
-                :data-shift-id="shift.id"
-                @drop="handleCellDrop($event, row.date, shift.id)"
-                @dragover="handleCellDragOver($event, row.date, shift.id)"
-                @dragleave="handleCellDragLeave()"
-                @click="handleCellClick(row.date, shift.id)"
-              >
-                <!-- 整格拖拽手柄 -->
-                <el-tooltip
-                  v-if="canDragCell(row.date, shift.id)"
-                  content="拖拽移动，按住Ctrl拖拽复制"
-                  placement="top"
-                  :show-after="200"
-                  effect="light"
-                  popper-class="schedule-handle-tooltip"
+                  </span>
+                </div>
+                <!-- 占满整个cell -->
+                <div
+                  :class="[
+                    'schedule-cell',
+                    cell.dateClass,
+                    {
+                      'drag-over':
+                        dragState.active &&
+                        dragState.targetDate === cell.date &&
+                        dragState.targetShiftId === cell.shiftId,
+                      'is-cell-transfer-target': showCellTransferActions(
+                        cell.date,
+                        cell.shiftId
+                      ),
+                      'has-cell-side-rail':
+                        cell.canDrag ||
+                        showCellTransferActions(cell.date, cell.shiftId),
+                    },
+                  ]"
+                  :data-date="cell.date"
+                  :data-shift-id="cell.shiftId"
+                  @drop="handleCellDrop($event, cell.date, cell.shiftId)"
+                  @dragover="handleCellDragOver($event, cell.date, cell.shiftId)"
+                  @dragleave="handleCellDragLeave()"
+                  @click="handleCellClick(cell.date, cell.shiftId)"
                 >
+                  <!-- 整格拖拽手柄 -->
+                  <el-tooltip
+                    v-if="cell.canDrag"
+                    content="拖动本格排班"
+                    placement="top"
+                    :show-after="200"
+                    effect="light"
+                    popper-class="schedule-handle-tooltip"
+                  >
+                    <div
+                      class="cell-handle"
+                      draggable="true"
+                      @dragstart.stop="
+                        handleCellHandleDragStart($event, cell.date, cell.shiftId)
+                      "
+                      @click.stop
+                    >
+                      <el-icon>
+                        <Rank />
+                      </el-icon>
+                    </div>
+                  </el-tooltip>
+
                   <div
-                    class="cell-handle"
-                    draggable="true"
-                    @dragstart.stop="
-                      handleCellHandleDragStart($event, row.date, shift.id)
-                    "
+                    v-if="showCellTransferActions(cell.date, cell.shiftId)"
+                    class="cell-transfer-actions"
                     @click.stop
                   >
-                    <el-icon>
-                      <Rank />
-                    </el-icon>
-                  </div>
-                </el-tooltip>
-                <el-space wrap>
-                  <template
-                    v-for="(personId, index) in getSchedulePersonIds(
-                      row.date,
-                      shift.id
-                    )"
-                    :key="personId"
-                  >
-                    <!-- 插入点在当前元素之前 -->
                     <div
-                      v-if="showPlaceholderAt(row.date, shift.id, index)"
-                      class="schedule-placeholder"
-                    ></div>
-
-                    <el-tag
-                      class="schedule-tag"
-                      :data-person-id="personId"
+                      class="cell-transfer-zone is-move"
                       :class="{
-                        'is-dragging':
-                          dragState.active &&
-                          dragState.personId === personId &&
-                          dragState.type === 'schedule',
+                        'is-active': isCellTransferActionActive(
+                          cell.date,
+                          cell.shiftId,
+                          'move'
+                        ),
                       }"
-                      :closable="
-                        isScheduleEditable(personId, shift.id) &&
-                        !isScheduleRemoving(personId, row.date, shift.id)
+                      data-cell-transfer-action="move"
+                      @drop.stop="
+                        handleCellActionDrop($event, cell.date, cell.shiftId, 'move')
                       "
-                      disable-transitions
-                      @close="removeSchedule(personId, row.date, shift.id)"
-                      :draggable="
-                        isScheduleEditable(personId, shift.id) &&
-                        !isScheduleRemoving(personId, row.date, shift.id)
+                      @dragover.prevent
+                      @dragenter.prevent
+                    >
+                      移动
+                    </div>
+                    <div
+                      class="cell-transfer-zone is-copy"
+                      :class="{
+                        'is-active': isCellTransferActionActive(
+                          cell.date,
+                          cell.shiftId,
+                          'copy'
+                        ),
+                        'is-disabled': !canCopyCellTo(cell.date),
+                      }"
+                      data-cell-transfer-action="copy"
+                      @drop.stop="
+                        handleCellActionDrop($event, cell.date, cell.shiftId, 'copy')
                       "
-                      @dragstart="
-                        isScheduleEditable(personId, shift.id) &&
-                        handleScheduleDragStart(
-                          $event,
-                          personId,
-                          row.date,
-                          shift.id
+                      @dragover.prevent
+                      @dragenter.prevent
+                    >
+                      复制
+                    </div>
+                  </div>
+
+                  <div class="schedule-tags">
+                    <template
+                      v-for="(person, index) in cell.people"
+                      :key="person.id"
+                    >
+                      <!-- 插入点在当前元素之前 -->
+                      <div
+                        v-if="showPlaceholderAt(cell.date, cell.shiftId, index)"
+                        class="schedule-placeholder"
+                      ></div>
+
+                      <el-tag
+                        class="schedule-tag"
+                        :data-person-id="person.id"
+                        :class="{
+                          'is-dragging':
+                            dragState.active &&
+                            dragState.personId === person.id &&
+                            dragState.type === 'schedule',
+                        }"
+                        :closable="
+                          person.editable &&
+                          !isScheduleRemoving(person.id, cell.date, cell.shiftId)
+                        "
+                        disable-transitions
+                        @close="removeSchedule(person.id, cell.date, cell.shiftId)"
+                        :draggable="
+                          person.editable &&
+                          !isScheduleRemoving(person.id, cell.date, cell.shiftId)
+                        "
+                        @dragstart="
+                          person.editable &&
+                          handleScheduleDragStart(
+                            $event,
+                            person.id,
+                            cell.date,
+                            cell.shiftId
+                          )
+                        "
+                        @dragend="handleDragEnd"
+                        :style="person.style"
+                      >
+                        <span>
+                          {{ person.name }}
+                        </span>
+                        <span v-if="person.archived" class="archived-badge">
+                          已删除
+                        </span>
+                      </el-tag>
+                    </template>
+
+                    <!-- 插入点在列表末尾 -->
+                    <div
+                      v-if="
+                        showPlaceholderAt(
+                          cell.date,
+                          cell.shiftId,
+                          cell.people.length
                         )
                       "
-                      @dragend="handleDragEnd"
-                      :style="{
-                        backgroundColor: getPersonColor(personId),
-                        color: getAdaptiveTextColor(getPersonColor(personId)),
-                        opacity:
-                          dragState.active &&
-                          dragState.personId === personId &&
-                          dragState.type === 'schedule'
-                            ? 0.4
-                            : 1,
-                      }"
-                    >
-                      <span>
-                        {{ getPersonName(personId) }}
-                      </span>
-                      <span v-if="isPersonArchived(personId)" class="archived-badge">
-                        已删除
-                      </span>
-                    </el-tag>
-                  </template>
-
-                  <!-- 插入点在列表末尾 -->
-                  <div
-                    v-if="
-                      showPlaceholderAt(
-                        row.date,
-                        shift.id,
-                        getSchedulePersonIds(row.date, shift.id).length
-                      )
-                    "
-                    class="schedule-placeholder"
-                  ></div>
-                </el-space>
-              </div>
+                      class="schedule-placeholder"
+                    ></div>
+                  </div>
+                </div>
+              </template>
             </template>
           </el-table-column>
         </el-table>
@@ -321,12 +360,20 @@
         </div>
       </div>
     </el-dialog>
-    <!-- </el-card> -->
   </div>
 </template>
 
 <script setup lang="ts">
-import { ref, onMounted, onBeforeUnmount, computed, toRef, watch } from "vue";
+import {
+  ref,
+  onMounted,
+  onBeforeUnmount,
+  computed,
+  toRef,
+  watch,
+  nextTick,
+  shallowRef,
+} from "vue";
 import { ElMessage, ElMessageBox } from "element-plus";
 import { Rank } from "@element-plus/icons-vue";
 import type {
@@ -369,7 +416,6 @@ const emit = defineEmits<{
 const currentMonth = toRef(props, "currentMonth");
 const {
   activePeople,
-  isPersonArchived,
   isScheduleEditable,
   isShiftArchived,
   loading,
@@ -379,6 +425,7 @@ const {
   removeSchedulesByIds,
   replaceSchedules,
   schedules,
+  schedulesByPersonId,
   shiftMap,
   shifts,
   visibleShifts,
@@ -391,7 +438,46 @@ const holidayDateMap = ref<Map<string, EffectiveHolidayEntry>>(new Map());
 const peopleSearch = ref("");
 const removingScheduleKeys = ref<Set<string>>(new Set());
 const schedulingBusy = ref(false);
+
+type DragOverPayload = {
+  cell: HTMLElement;
+  clientX: number;
+  clientY: number;
+  date: string;
+  shiftId: string;
+  cellTransferAction?: CellTransferMode;
+};
+
+type CellTransferMode = "move" | "copy";
+type ScheduleDateRow = ReturnType<typeof getMonthDates>[number];
+type ScheduleDateTone = "holiday" | "transfer-workday" | "weekend";
+type PersonTagStyle = {
+  backgroundColor: string;
+  color: string;
+};
+type PersonRenderInfo = {
+  id: string;
+  name: string;
+  color: string;
+  style: PersonTagStyle;
+  archived: boolean;
+};
+type ScheduleCellPerson = PersonRenderInfo & {
+  editable: boolean;
+};
+type ScheduleCellView = {
+  key: string;
+  date: string;
+  shiftId: string;
+  dateClass: string;
+  people: ScheduleCellPerson[];
+  canDrag: boolean;
+  asList: ScheduleCellView[];
+};
+
 let dragOverFrame = 0;
+let pendingDragOver: DragOverPayload | null = null;
+let loadDataRequestId = 0;
 
 const dragState = ref<{
   active: boolean;
@@ -402,11 +488,19 @@ const dragState = ref<{
   targetDate?: string;
   targetShiftId?: string;
   targetIndex?: number;
+  targetCellAction?: CellTransferMode;
 }>({
   active: false,
   type: "person",
   personId: "",
 });
+
+const UNKNOWN_PERSON_COLOR = "#ccc";
+const UNKNOWN_PERSON_TAG_STYLE: PersonTagStyle = {
+  backgroundColor: UNKNOWN_PERSON_COLOR,
+  color: getAdaptiveTextColor(UNKNOWN_PERSON_COLOR),
+};
+const EMPTY_PERSON_IDS: string[] = [];
 
 // 计算属性
 const peopleWithStats = computed(() => {
@@ -444,6 +538,33 @@ const personNameDuplicateMap = computed(() => {
   return counts;
 });
 
+const personRenderInfoMap = computed(() => {
+  const duplicateMap = personNameDuplicateMap.value;
+  const map = new Map<string, PersonRenderInfo>();
+
+  for (const person of people.value) {
+    const color = person.color || UNKNOWN_PERSON_COLOR;
+    const duplicateCount = duplicateMap.get(person.name.trim()) || 0;
+    const name =
+      duplicateCount <= 1
+        ? person.name
+        : `${person.name} (${getIdDisplaySuffix(person.id)})`;
+
+    map.set(person.id, {
+      id: person.id,
+      name,
+      color,
+      style: {
+        backgroundColor: color,
+        color: getAdaptiveTextColor(color),
+      },
+      archived: Boolean(person.archivedAt),
+    });
+  }
+
+  return map;
+});
+
 const monthDates = computed(() => {
   if (!currentMonth.value) return [];
   return getMonthDates(currentMonth.value);
@@ -451,6 +572,125 @@ const monthDates = computed(() => {
 
 const restShiftId = computed(() => getRestShiftId(shifts.value));
 const hasRemovingSchedule = computed(() => removingScheduleKeys.value.size > 0);
+
+const buildScheduleCellMap = (sourceSchedules: Schedule[]) => {
+  const map = new Map<string, Schedule[]>();
+  for (const schedule of sourceSchedules) {
+    const key = getScheduleCellKey(schedule.date, schedule.shiftId);
+    const bucket = map.get(key);
+    if (bucket) {
+      bucket.push(schedule);
+    } else {
+      map.set(key, [schedule]);
+    }
+  }
+
+  for (const [key, bucket] of map) {
+    map.set(key, sortByOrder(bucket));
+  }
+
+  return map;
+};
+
+const scheduleCellMap = shallowRef<Map<string, Schedule[]>>(new Map());
+
+watch(
+  schedules,
+  (nextSchedules, previousSchedules) => {
+    const oldSchedules = previousSchedules || [];
+    if (oldSchedules.length === 0 || nextSchedules.length === 0) {
+      scheduleCellMap.value = buildScheduleCellMap(nextSchedules);
+      return;
+    }
+
+    const oldById = new Map(
+      oldSchedules.map((schedule) => [schedule.id, schedule])
+    );
+    const nextById = new Map(
+      nextSchedules.map((schedule) => [schedule.id, schedule])
+    );
+    const affectedKeys = new Set<string>();
+
+    for (const oldSchedule of oldSchedules) {
+      const nextSchedule = nextById.get(oldSchedule.id);
+      const oldKey = getScheduleCellKey(
+        oldSchedule.date,
+        oldSchedule.shiftId
+      );
+      if (!nextSchedule) {
+        affectedKeys.add(oldKey);
+        continue;
+      }
+
+      const nextKey = getScheduleCellKey(
+        nextSchedule.date,
+        nextSchedule.shiftId
+      );
+      if (
+        oldKey !== nextKey ||
+        oldSchedule.order !== nextSchedule.order ||
+        oldSchedule.personId !== nextSchedule.personId
+      ) {
+        affectedKeys.add(oldKey);
+        affectedKeys.add(nextKey);
+      }
+    }
+
+    for (const nextSchedule of nextSchedules) {
+      if (!oldById.has(nextSchedule.id)) {
+        affectedKeys.add(
+          getScheduleCellKey(nextSchedule.date, nextSchedule.shiftId)
+        );
+      }
+    }
+
+    if (affectedKeys.size === 0) return;
+    if (
+      affectedKeys.size > 50 ||
+      affectedKeys.size > Math.max(1, nextSchedules.length / 2)
+    ) {
+      scheduleCellMap.value = buildScheduleCellMap(nextSchedules);
+      return;
+    }
+
+    const nextMap = new Map(scheduleCellMap.value);
+    for (const key of affectedKeys) {
+      nextMap.delete(key);
+    }
+
+    for (const schedule of nextSchedules) {
+      const key = getScheduleCellKey(schedule.date, schedule.shiftId);
+      if (!affectedKeys.has(key)) continue;
+      const bucket = nextMap.get(key);
+      if (bucket) {
+        bucket.push(schedule);
+      } else {
+        nextMap.set(key, [schedule]);
+      }
+    }
+
+    for (const key of affectedKeys) {
+      const bucket = nextMap.get(key);
+      if (bucket) {
+        nextMap.set(key, sortByOrder(bucket));
+      }
+    }
+
+    scheduleCellMap.value = nextMap;
+  },
+  { immediate: true }
+);
+
+const schedulePersonIdsByCell = computed(() => {
+  const map = new Map<string, string[]>();
+  for (const [key, bucket] of scheduleCellMap.value) {
+    map.set(
+      key,
+      bucket.map((schedule) => schedule.personId)
+    );
+  }
+  return map;
+});
 
 const shiftNameDuplicateMap = computed(() => {
   const counts = new Map<string, number>();
@@ -486,77 +726,81 @@ const isScheduleRemoving = (
     getScheduleRemovingKey(personId, date, shiftId)
   );
 
-const scheduleCellMap = computed(() => {
-  const map = new Map<string, Schedule[]>();
-  for (const schedule of schedules.value) {
-    const key = getScheduleCellKey(schedule.date, schedule.shiftId);
-    const bucket = map.get(key);
-    if (bucket) {
-      bucket.push(schedule);
-    } else {
-      map.set(key, [schedule]);
-    }
-  }
-
-  for (const bucket of map.values()) {
-    const sorted = sortByOrder(bucket);
-    bucket.splice(0, bucket.length, ...sorted);
-  }
-
-  return map;
-});
-
 // 方法
 /**
  * 加载数据
  */
 const loadData = async () => {
-  if (!currentMonth.value) return;
-  
+  const monthValue = currentMonth.value;
+  if (!monthValue) {
+    loadDataRequestId += 1;
+    loading.value = false;
+    return;
+  }
+
+  const requestId = ++loadDataRequestId;
   loading.value = true;
   try {
-    const [peopleData, shiftsData, schedulesData] = await Promise.all([
+    const [
+      peopleData,
+      shiftsData,
+      schedulesData,
+      holidayData,
+      extraRestDays,
+    ] = await Promise.all([
       repositories.people.getAllIncludingArchived(),
       repositories.shifts.getAllIncludingArchived(),
-      repositories.schedules.getByMonth(currentMonth.value),
+      repositories.schedules.getByMonth(monthValue),
+      loadHolidayData(monthValue),
+      loadExtraRestDays(monthValue),
     ]);
+
+    if (requestId !== loadDataRequestId || currentMonth.value !== monthValue) {
+      return;
+    }
 
     people.value = peopleData;
     shifts.value = shiftsData;
     schedules.value = schedulesData;
-    await loadHolidayData();
-
-    try {
-      const [year, monthNum] = currentMonth.value.split("-").map(Number);
-      const config = await repositories.extraRestConfigs.getByYearAndMonth(
-        year,
-        monthNum
-      );
-      extraRestDaysForCurrentMonth.value = config?.extraRestDays || 0;
-    } catch (error: any) {
-      console.error("[extraRest-load-error]", {
-        time: new Date().toISOString(),
-        params: { month: currentMonth.value },
-        message: error?.message,
-        stack: error?.stack,
-      });
-      extraRestDaysForCurrentMonth.value = 0;
-    }
+    holidayDateMap.value = holidayData;
+    extraRestDaysForCurrentMonth.value = extraRestDays;
   } catch (error) {
-    console.error("加载数据失败:", error);
-    ElMessage.error("加载数据失败");
+    if (requestId === loadDataRequestId && currentMonth.value === monthValue) {
+      console.error("加载数据失败:", error);
+      ElMessage.error("加载数据失败");
+    }
   } finally {
-    loading.value = false;
+    if (requestId === loadDataRequestId) {
+      loading.value = false;
+    }
   }
 };
 
-const loadHolidayData = async () => {
-  if (!currentMonth.value) return;
+const loadHolidayData = async (monthValue: string) => {
   await holidayService.ensureBuiltinHolidays();
-  holidayDateMap.value = await holidayService.getEffectiveMonthDateMap(
+  return holidayService.getEffectiveMonthDateMap(
     "CN",
-    currentMonth.value
+    monthValue
   );
+};
+
+const loadExtraRestDays = async (monthValue: string) => {
+  try {
+    const [year, monthNum] = monthValue.split("-").map(Number);
+    const config = await repositories.extraRestConfigs.getByYearAndMonth(
+      year,
+      monthNum
+    );
+    return config?.extraRestDays || 0;
+  } catch (error: any) {
+    console.error("[extraRest-load-error]", {
+      time: new Date().toISOString(),
+      params: { month: monthValue },
+      message: error?.message,
+      stack: error?.stack,
+    });
+    return 0;
+  }
 };
 
 /**
@@ -568,7 +812,7 @@ const calculatePersonStatistics = (personId: string, month: string) => {
   return buildPersonStatistics({
     person,
     month,
-    schedules: schedules.value,
+    schedules: schedulesByPersonId.value.get(personId) || [],
     extraRestDays: extraRestDaysForCurrentMonth.value,
     restShiftId: restShiftId.value,
   });
@@ -581,23 +825,110 @@ const setMonth = async (month: string) => {
 
 const getHolidayEntry = (date: string) => holidayDateMap.value.get(date) || null;
 
-const getDateCellClass = (date: string, weekdayName: string) => {
+const isWeekend = (weekdayName: string) =>
+  weekdayName === "周六" || weekdayName === "周日";
+
+const getScheduleDateTone = (
+  date: string,
+  weekdayName: string
+): ScheduleDateTone | "" => {
   const holiday = getHolidayEntry(date);
-  if (holiday?.type === "public_holiday") return "is-holiday";
-  if (holiday?.type === "transfer_workday") return "is-transfer-workday";
-  if (weekdayName === "周六" || weekdayName === "周日") return "is-weekend";
+  if (holiday?.type === "transfer_workday") return "transfer-workday";
+  if (holiday?.type === "public_holiday") return "holiday";
+  if (isWeekend(weekdayName)) return "weekend";
   return "";
 };
 
-const canDragCell = (date: string, shiftId: string) => {
-  if (isShiftArchived(shiftId)) {
-    return false;
+const getDateCellClass = (date: string, weekdayName: string) => {
+  const tone = getScheduleDateTone(date, weekdayName);
+  if (tone) return `is-${tone}`;
+  return "";
+};
+
+const getScheduleRowClassName = ({ row }: { row: ScheduleDateRow }) => {
+  const tone = getScheduleDateTone(row.date, row.weekdayName);
+  return tone ? `schedule-row-${tone}` : "";
+};
+
+const getScheduleCellDateClass = (date: string, weekdayName: string) => {
+  const tone = getScheduleDateTone(date, weekdayName);
+  return tone ? `is-${tone}-date` : "";
+};
+
+const createScheduleCellView = (
+  view: Omit<ScheduleCellView, "asList">
+): ScheduleCellView => {
+  const scheduleCellView: ScheduleCellView = {
+    ...view,
+    asList: [],
+  };
+  scheduleCellView.asList = [scheduleCellView];
+  return scheduleCellView;
+};
+
+const scheduleCellViewMap = computed(() => {
+  const map = new Map<string, ScheduleCellView>();
+  const personInfoMap = personRenderInfoMap.value;
+  const personIdsByCell = schedulePersonIdsByCell.value;
+  const shiftsById = shiftMap.value;
+
+  for (const row of monthDates.value) {
+    const dateClass = getScheduleCellDateClass(row.date, row.weekdayName);
+
+    for (const shift of visibleShifts.value) {
+      const key = getScheduleCellKey(row.date, shift.id);
+      const personIds = personIdsByCell.get(key) || EMPTY_PERSON_IDS;
+      const shiftArchived = Boolean(shiftsById.get(shift.id)?.archivedAt);
+      const cellPeople = personIds.map((personId) => {
+        const info = personInfoMap.get(personId);
+        const archived = Boolean(info?.archived);
+
+        return {
+          id: personId,
+          name: info?.name || "未知",
+          color: info?.color || UNKNOWN_PERSON_COLOR,
+          style: info?.style || UNKNOWN_PERSON_TAG_STYLE,
+          archived,
+          editable: !archived && !shiftArchived,
+        };
+      });
+
+      map.set(
+        key,
+        createScheduleCellView({
+          key,
+          date: row.date,
+          shiftId: shift.id,
+          dateClass,
+          people: cellPeople,
+          canDrag:
+            cellPeople.length > 0 &&
+            cellPeople.every((person) => person.editable),
+        })
+      );
+    }
   }
-  const personIds = getSchedulePersonIds(date, shiftId);
-  return (
-    personIds.length > 0 &&
-    personIds.every((personId) => isScheduleEditable(personId, shiftId))
-  );
+
+  return map;
+});
+
+const getScheduleCellViewList = (
+  date: string,
+  weekdayName: string,
+  shiftId: string
+) => {
+  const key = getScheduleCellKey(date, shiftId);
+  const cell = scheduleCellViewMap.value.get(key);
+  if (cell) return cell.asList;
+
+  return createScheduleCellView({
+    key,
+    date,
+    shiftId,
+    dateClass: getScheduleCellDateClass(date, weekdayName),
+    people: [],
+    canDrag: false,
+  }).asList;
 };
 
 /**
@@ -607,7 +938,15 @@ const handlePersonDragStart = (
   event: DragEvent,
   person: PersonWithStatistics
 ) => {
-  if (!event.dataTransfer) return;
+  if (schedulingBusy.value) {
+    event.preventDefault();
+    return;
+  }
+  if (!event.dataTransfer) {
+    event.preventDefault();
+    resetDragState();
+    return;
+  }
 
   const dragData: DragData = {
     type: "person",
@@ -628,7 +967,12 @@ const handlePersonDragStart = (
 /**
  * 处理拖拽结束
  */
-const handleDragEnd = () => {
+const resetDragState = () => {
+  if (dragOverFrame) {
+    window.cancelAnimationFrame(dragOverFrame);
+    dragOverFrame = 0;
+  }
+  pendingDragOver = null;
   dragState.value = {
     active: false,
     type: "person",
@@ -636,7 +980,34 @@ const handleDragEnd = () => {
     targetDate: undefined,
     targetShiftId: undefined,
     targetIndex: undefined,
+    targetCellAction: undefined,
   };
+};
+
+const handleDragEnd = () => {
+  resetDragState();
+};
+
+const cancelDanglingDrag = () => {
+  if (!dragState.value.active) return;
+  resetDragState();
+};
+
+const handleGlobalKeyDown = (event: KeyboardEvent) => {
+  if (!dragState.value.active) return;
+  if (
+    event.key === "Escape" ||
+    event.metaKey ||
+    event.altKey
+  ) {
+    resetDragState();
+  }
+};
+
+const handleVisibilityChange = () => {
+  if (document.visibilityState !== "visible") {
+    cancelDanglingDrag();
+  }
 };
 
 /**
@@ -651,31 +1022,63 @@ const showPlaceholderAt = (date: string, shiftId: string, index: number) => {
   );
 };
 
+const isSameSourceCell = (date: string, shiftId: string) =>
+  dragState.value.sourceDate === date && dragState.value.sourceShiftId === shiftId;
+
+const canCopyCellTo = (date: string) =>
+  dragState.value.type === "cell" && dragState.value.sourceDate !== date;
+
+const showCellTransferActions = (date: string, shiftId: string) =>
+  dragState.value.active &&
+  dragState.value.type === "cell" &&
+  dragState.value.targetDate === date &&
+  dragState.value.targetShiftId === shiftId &&
+  !isSameSourceCell(date, shiftId);
+
+const isCellTransferActionActive = (
+  date: string,
+  shiftId: string,
+  action: CellTransferMode
+) =>
+  showCellTransferActions(date, shiftId) &&
+  dragState.value.targetCellAction === action;
+
+const getCellTransferActionFromEvent = (
+  event: DragEvent
+): CellTransferMode | undefined => {
+  const target = event.target instanceof HTMLElement ? event.target : null;
+  const action = target
+    ?.closest<HTMLElement>("[data-cell-transfer-action]")
+    ?.dataset.cellTransferAction;
+  return action === "copy" || action === "move" ? action : undefined;
+};
+
 /**
  * 处理单元格拖拽进入/悬停
  */
-const handleCellDragOver = (
-  event: DragEvent,
-  date: string,
-  shiftId: string
-) => {
-  event.preventDefault();
-  if (dragOverFrame) return;
-  dragOverFrame = window.requestAnimationFrame(() => {
-    dragOverFrame = 0;
-  });
+const applyDragOver = ({
+  cell,
+  clientX,
+  clientY,
+  date,
+  shiftId,
+  cellTransferAction,
+}: DragOverPayload) => {
+  const ds = dragState.value;
+  if (!ds.active) return;
 
-  dragState.value.targetDate = date;
-  dragState.value.targetShiftId = shiftId;
-
-  const cell = event.currentTarget as HTMLElement;
   const tags = Array.from(
     cell.querySelectorAll(".schedule-tag:not(.is-dragging)")
   );
 
   // 如果是整格拖拽，不计算插入位置，直接放在最后
-  if (dragState.value.type === "cell") {
-    dragState.value.targetIndex = -1;
+  if (ds.type === "cell") {
+    if (ds.targetDate !== date) ds.targetDate = date;
+    if (ds.targetShiftId !== shiftId) ds.targetShiftId = shiftId;
+    if (ds.targetIndex !== -1) ds.targetIndex = -1;
+    if (ds.targetCellAction !== cellTransferAction) {
+      ds.targetCellAction = cellTransferAction;
+    }
     return;
   }
 
@@ -686,19 +1089,19 @@ const handleCellDragOver = (
       const rect = tag.getBoundingClientRect();
 
       // 如果鼠标在当前元素所在行的下方，说明当前元素肯定在插入点之前
-      if (event.clientY > rect.bottom) {
+      if (clientY > rect.bottom) {
         continue;
       }
 
       // 如果鼠标在当前元素所在行的上方，说明当前元素在插入点之后
-      if (event.clientY < rect.top) {
+      if (clientY < rect.top) {
         insertIndex = i;
         break;
       }
 
       // 如果在同一行，比较 X
       const centerX = rect.left + rect.width / 2;
-      if (event.clientX < centerX) {
+      if (clientX < centerX) {
         insertIndex = i;
         break;
       }
@@ -707,10 +1110,9 @@ const handleCellDragOver = (
 
   // 如果是同单元格内的拖拽，需要将 visual index 转换为真实列表的 index
   if (
-    dragState.value.active &&
-    dragState.value.type === "schedule" &&
-    dragState.value.sourceDate === date &&
-    dragState.value.sourceShiftId === shiftId
+    ds.type === "schedule" &&
+    ds.sourceDate === date &&
+    ds.sourceShiftId === shiftId
   ) {
     if (insertIndex < tags.length) {
       const targetEl = tags[insertIndex] as HTMLElement;
@@ -729,11 +1131,81 @@ const handleCellDragOver = (
     }
   }
 
-  dragState.value.targetIndex = insertIndex;
+  if (ds.targetDate !== date) ds.targetDate = date;
+  if (ds.targetShiftId !== shiftId) ds.targetShiftId = shiftId;
+  if (ds.targetIndex !== insertIndex) ds.targetIndex = insertIndex;
+  if (ds.targetCellAction !== undefined) ds.targetCellAction = undefined;
+};
+
+const flushPendingDragOver = () => {
+  if (dragOverFrame) {
+    window.cancelAnimationFrame(dragOverFrame);
+    dragOverFrame = 0;
+  }
+
+  const payload = pendingDragOver;
+  pendingDragOver = null;
+  if (payload) {
+    applyDragOver(payload);
+  }
+};
+
+const handleCellDragOver = (
+  event: DragEvent,
+  date: string,
+  shiftId: string
+) => {
+  event.preventDefault();
+  const action = getCellTransferActionFromEvent(event);
+  if (event.dataTransfer && dragState.value.type === "cell") {
+    event.dataTransfer.dropEffect =
+      action === "copy" || (!action && (event.ctrlKey || event.metaKey))
+        ? "copy"
+        : "move";
+  }
+  const cell = event.currentTarget as HTMLElement | null;
+  if (!cell) return;
+
+  pendingDragOver = {
+    cell,
+    clientX: event.clientX,
+    clientY: event.clientY,
+    date,
+    shiftId,
+    cellTransferAction:
+      action ?? (event.ctrlKey || event.metaKey ? "copy" : "move"),
+  };
+
+  if (dragOverFrame) return;
+  dragOverFrame = window.requestAnimationFrame(() => {
+    const payload = pendingDragOver;
+    pendingDragOver = null;
+    dragOverFrame = 0;
+    if (payload) {
+      applyDragOver(payload);
+    }
+  });
 };
 
 const handleCellDragLeave = () => {
   // no-op
+};
+
+const handleCellActionDrop = (
+  event: DragEvent,
+  date: string,
+  shiftId: string,
+  mode: CellTransferMode
+) => {
+  if (mode === "copy" && !canCopyCellTo(date)) {
+    event.preventDefault();
+    flushPendingDragOver();
+    ElMessage.warning("同一天内不能复制整格排班，请使用移动调整班次");
+    handleDragEnd();
+    return;
+  }
+
+  void handleCellDrop(event, date, shiftId, mode);
 };
 
 /**
@@ -742,12 +1214,26 @@ const handleCellDragLeave = () => {
 const handleCellDrop = async (
   event: DragEvent,
   date: string,
-  shiftId: string
+  shiftId: string,
+  cellTransferMode?: CellTransferMode
 ) => {
   event.preventDefault();
-  if (!event.dataTransfer) return;
-  if (schedulingBusy.value) return;
+  flushPendingDragOver();
+  if (!event.dataTransfer) {
+    handleDragEnd();
+    return;
+  }
+  if (schedulingBusy.value) {
+    // 处理中再次落点：清理拖拽视觉状态，避免占位符残留
+    handleDragEnd();
+    return;
+  }
   schedulingBusy.value = true;
+
+  // 失败兜底标记：仅在确认数据可能不一致时才异步 reload，
+  // 避免 catch 内同步 loadData 拆掉正在拖拽的 DOM。
+  let needsReloadAfterError = false;
+  let lastErrorMessage = "排班失败";
 
   try {
     const dragDataStr = event.dataTransfer.getData("text/plain");
@@ -826,13 +1312,6 @@ const handleCellDrop = async (
       });
       replaceSchedules(result.updatedSchedules);
       mergeSchedules(result.movedSchedule);
-      console.info("[schedule-move]", {
-        personId: dragData.personId,
-        sourceDate: dragData.sourceDate,
-        sourceShiftId: dragData.sourceShiftId,
-        targetDate: date,
-        targetShiftId: shiftId,
-      });
       ElMessage.success("已移动排班");
       handleDragEnd();
       return;
@@ -860,8 +1339,16 @@ const handleCellDrop = async (
         return;
       }
 
-      // 判断是复制还是移动 (Ctrl键)
-      const isCopy = event.ctrlKey || event.metaKey;
+      const transferMode =
+        cellTransferMode ??
+        getCellTransferActionFromEvent(event) ??
+        (event.ctrlKey || event.metaKey ? "copy" : "move");
+
+      if (transferMode === "copy" && sourceDate === date) {
+        ElMessage.warning("同一天内不能复制整格排班，请使用移动调整班次");
+        handleDragEnd();
+        return;
+      }
 
       const result = await scheduleService.transferCellSchedules({
         sourceDate,
@@ -870,13 +1357,13 @@ const handleCellDrop = async (
         targetShiftId: shiftId,
         month: currentMonth.value!,
         schedules: schedules.value,
-        mode: isCopy ? "copy" : "move",
+        mode: transferMode,
       });
 
       if (result.createdCount === 0) {
         if (result.conflictCount > 0) {
           ElMessage.warning(
-            isCopy
+            transferMode === "copy"
               ? "目标日期已有这些人员的排班，未复制"
               : "目标日期已有这些人员的排班，未移动"
           );
@@ -885,23 +1372,12 @@ const handleCellDrop = async (
         return;
       }
 
-      const actionName = isCopy ? "复制" : "移动";
+      const actionName = transferMode === "copy" ? "复制" : "移动";
       let msg = `${actionName}成功 ${result.createdCount} 人`;
       if (result.conflictCount > 0) {
         msg += `，跳过 ${result.conflictCount} 人`;
       }
       ElMessage.success(msg);
-
-      console.info("[schedule-cell-transfer]", {
-        sourceDate,
-        sourceShiftId,
-        targetDate: date,
-        targetShiftId: shiftId,
-        mode: isCopy ? "copy" : "move",
-        createdCount: result.createdCount,
-        conflictCount: result.conflictCount,
-        skippedPersonIds: result.skippedPersonIds,
-      });
 
       removeSchedulesByIds(result.deletedIds);
       replaceSchedules(result.updatedSchedules);
@@ -978,11 +1454,24 @@ const handleCellDrop = async (
       time: new Date().toISOString(),
       target: { date, shiftId },
     });
-    ElMessage.error(error instanceof Error ? error.message : "排班失败");
-    await loadData();
+    // 注意：不要在 catch 内同步 await loadData()。
+    // loadData 会整体替换 schedules.value，触发 v-for 重渲染，
+    // 销毁正在拖拽的 .schedule-tag 节点导致 Chromium 不再派发 dragend，
+    // dragState 残留、占位符高亮、下次拖拽视觉错乱。
+    // 改为：finally 中先清理拖拽态，再用 nextTick 异步触发 reload，
+    // 保证当前拖拽生命周期已经走完。
+    needsReloadAfterError = true;
+    lastErrorMessage = error instanceof Error ? error.message : "排班失败";
   } finally {
     schedulingBusy.value = false;
     handleDragEnd();
+    if (needsReloadAfterError) {
+      ElMessage.error(lastErrorMessage);
+      // 拖拽生命周期结束后再 reload，避免拆掉正在拖拽的 DOM
+      nextTick(() => {
+        void loadData();
+      });
+    }
   }
 };
 
@@ -1014,7 +1503,15 @@ const handleCellHandleDragStart = (
   sourceDate: string,
   sourceShiftId: string
 ) => {
-  if (!event.dataTransfer) return;
+  if (schedulingBusy.value) {
+    event.preventDefault();
+    return;
+  }
+  if (!event.dataTransfer) {
+    event.preventDefault();
+    resetDragState();
+    return;
+  }
 
   const dragData: DragData = {
     type: "cell",
@@ -1042,7 +1539,15 @@ const handleScheduleDragStart = (
   sourceShiftId: string
 ) => {
   try {
-    if (!event.dataTransfer) return;
+    if (schedulingBusy.value) {
+      event.preventDefault();
+      return;
+    }
+    if (!event.dataTransfer) {
+      event.preventDefault();
+      resetDragState();
+      return;
+    }
     const dragData: DragData = {
       type: "schedule",
       personId,
@@ -1084,27 +1589,23 @@ const handleCellClick = (date: string, shiftId: string) => {
  */
 const getSchedulePersonIds = (date: string, shiftId: string) => {
   return (
-    scheduleCellMap.value.get(getScheduleCellKey(date, shiftId)) || []
-  ).map((schedule) => schedule.personId);
+    schedulePersonIdsByCell.value.get(getScheduleCellKey(date, shiftId)) ||
+    EMPTY_PERSON_IDS
+  );
 };
 
 /**
  * 获取人员颜色
  */
 const getPersonColor = (personId: string) => {
-  const person = personMap.value.get(personId);
-  return person?.color || "#ccc";
+  return personRenderInfoMap.value.get(personId)?.color || UNKNOWN_PERSON_COLOR;
 };
 
 /**
  * 获取人员姓名
  */
 const getPersonName = (personId: string) => {
-  const person = personMap.value.get(personId);
-  if (!person) return "未知";
-  const duplicateCount = personNameDuplicateMap.value.get(person.name.trim()) || 0;
-  if (duplicateCount <= 1) return person.name;
-  return `${person.name} (${getIdDisplaySuffix(person.id)})`;
+  return personRenderInfoMap.value.get(personId)?.name || "未知";
 };
 
 
@@ -1151,13 +1652,22 @@ const removeSchedule = async (
 // 页面加载时初始化数据
 onMounted(() => {
   loadData();
+  window.addEventListener("blur", cancelDanglingDrag);
+  window.addEventListener("dragend", cancelDanglingDrag);
+  window.addEventListener("dragcancel", cancelDanglingDrag);
+  window.addEventListener("drop", cancelDanglingDrag);
+  window.addEventListener("keydown", handleGlobalKeyDown, true);
+  document.addEventListener("visibilitychange", handleVisibilityChange);
 });
 
 onBeforeUnmount(() => {
-  if (dragOverFrame) {
-    window.cancelAnimationFrame(dragOverFrame);
-    dragOverFrame = 0;
-  }
+  window.removeEventListener("blur", cancelDanglingDrag);
+  window.removeEventListener("dragend", cancelDanglingDrag);
+  window.removeEventListener("dragcancel", cancelDanglingDrag);
+  window.removeEventListener("drop", cancelDanglingDrag);
+  window.removeEventListener("keydown", handleGlobalKeyDown, true);
+  document.removeEventListener("visibilitychange", handleVisibilityChange);
+  resetDragState();
 });
 
 watch(
@@ -1178,6 +1688,10 @@ defineExpose({
 
 <style lang="scss" scoped>
 .schedule-table-view {
+  --schedule-holiday-color: var(--el-color-primary);
+  --schedule-transfer-workday-color: var(--el-color-danger);
+  --schedule-weekend-color: #14b8a6;
+
   height: 100%;
 
   .schedule-container {
@@ -1234,7 +1748,9 @@ defineExpose({
         border: 1px solid var(--el-border-color);
         border-radius: 6px;
         cursor: move;
-        transition: all 0.3s;
+        transition:
+          background-color 0.18s,
+          border-color 0.18s;
 
         &:hover {
           background: var(--el-color-primary-light-9);
@@ -1290,9 +1806,10 @@ defineExpose({
     border-radius: 8px;
     padding: 20px;
     box-shadow: 0 2px 12px 0 rgba(0, 0, 0, 0.1);
-    overflow: auto;
+    overflow: hidden;
 
     :deep(.schedule-tag) {
+      flex: 0 0 auto;
       border-color: transparent;
       cursor: grab;
       transition: transform 0.2s, opacity 0.2s;
@@ -1326,17 +1843,17 @@ defineExpose({
     }
 
     .is-weekend {
-      color: var(--el-color-warning);
+      color: var(--schedule-weekend-color);
       font-weight: 600;
     }
 
     .is-holiday {
-      color: var(--el-color-primary);
+      color: var(--schedule-holiday-color);
       font-weight: 700;
     }
 
     .is-transfer-workday {
-      color: var(--el-color-danger);
+      color: var(--schedule-transfer-workday-color);
       font-weight: 700;
     }
 
@@ -1378,28 +1895,149 @@ defineExpose({
     margin-top: 2px;
   }
 
+  .schedule-cell-spacer,
+  .schedule-tags {
+    width: 100%;
+    box-sizing: border-box;
+    display: flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 4px 8px;
+  }
+
+  .schedule-cell-spacer {
+    min-height: 34px;
+    padding: 5px;
+    opacity: 0;
+    pointer-events: none;
+
+    &.has-cell-side-rail {
+      padding-right: 30px;
+    }
+  }
+
+  .schedule-tags {
+    min-height: 24px;
+  }
+
+  .schedule-cell-spacer-tag {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    max-width: 100%;
+    height: 24px;
+    padding: 0 9px;
+    box-sizing: border-box;
+    border: 1px solid transparent;
+    border-radius: 4px;
+    font-size: 12px;
+    line-height: 22px;
+    white-space: nowrap;
+
+    &::after {
+      content: "";
+      flex: 0 0 14px;
+      width: 14px;
+      height: 14px;
+      margin-left: 6px;
+    }
+  }
+
   .schedule-cell {
     position: absolute;
-    top: 0;
-    left: 0;
-    width: 100%;
-    height: 100%;
-    min-height: 20px;
+    inset: 0;
+    min-height: 34px;
     padding: 5px;
+    box-sizing: border-box;
     border: 1px dashed #dcdfe6;
     border-radius: 4px;
-    background: var(--el-fill-color-light);
+    background: color-mix(
+      in srgb,
+      var(--el-fill-color-light) 45%,
+      transparent
+    );
     cursor: pointer;
-    transition: all 0.3s;
+    overflow: hidden;
+    contain: paint;
+    transition:
+      background-color 0.18s,
+      border-color 0.18s;
+
+    &.has-cell-side-rail {
+      padding-right: 30px;
+    }
 
     &:hover {
       border-color: var(--el-color-primary);
       background: var(--el-color-primary-light-9);
     }
 
+    &.is-holiday-date {
+      border-color: rgba(64, 158, 255, 0.24);
+      background: color-mix(
+        in srgb,
+        var(--schedule-holiday-color) 14%,
+        var(--el-bg-color) 86%
+      );
+    }
+
+    &.is-transfer-workday-date {
+      border-color: rgba(245, 108, 108, 0.24);
+      background: color-mix(
+        in srgb,
+        var(--schedule-transfer-workday-color) 6%,
+        var(--el-bg-color) 94%
+      );
+    }
+
+    &.is-weekend-date {
+      border-color: rgba(20, 184, 166, 0.26);
+      background: color-mix(
+        in srgb,
+        var(--schedule-weekend-color) 8%,
+        var(--el-bg-color) 92%
+      );
+    }
+
+    &.is-holiday-date:hover {
+      border-color: rgba(64, 158, 255, 0.46);
+      background: color-mix(
+        in srgb,
+        var(--schedule-holiday-color) 20%,
+        var(--el-bg-color) 80%
+      );
+    }
+
+    &.is-transfer-workday-date:hover {
+      border-color: rgba(245, 108, 108, 0.46);
+      background: color-mix(
+        in srgb,
+        var(--schedule-transfer-workday-color) 11%,
+        var(--el-bg-color) 89%
+      );
+    }
+
+    &.is-weekend-date:hover {
+      border-color: rgba(20, 184, 166, 0.46);
+      background: color-mix(
+        in srgb,
+        var(--schedule-weekend-color) 13%,
+        var(--el-bg-color) 87%
+      );
+    }
+
     &.drag-over {
       border-color: var(--el-color-success);
       background: var(--el-color-success-light-9);
+    }
+
+    &.is-cell-transfer-target {
+      border-style: solid;
+      background: color-mix(
+        in srgb,
+        var(--el-color-success-light-9) 80%,
+        var(--el-bg-color) 20%
+      );
     }
 
     .cell-handle {
@@ -1416,7 +2054,11 @@ defineExpose({
       border-radius: 4px;
       cursor: grab;
       opacity: 0;
-      transition: all 0.2s;
+      transition:
+        opacity 0.16s,
+        background-color 0.16s,
+        border-color 0.16s,
+        color 0.16s;
       z-index: 10;
       color: var(--el-text-color-secondary);
 
@@ -1434,6 +2076,91 @@ defineExpose({
     &:hover .cell-handle {
       opacity: 1;
     }
+
+    &.is-cell-transfer-target .cell-handle {
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .cell-transfer-actions {
+      position: absolute;
+      inset: 3px;
+      z-index: 20;
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+      gap: 3px;
+    }
+
+    .cell-transfer-zone {
+      min-width: 0;
+      min-height: 0;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      border-radius: 6px;
+      border: 1px solid var(--el-border-color);
+      color: var(--el-text-color-primary);
+      font-size: 13px;
+      font-weight: 700;
+      text-shadow: 0 1px 0 rgba(255, 255, 255, 0.6);
+      box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.25);
+      transition:
+        background-color 0.16s,
+        border-color 0.16s,
+        color 0.16s,
+        transform 0.16s;
+
+      &:hover {
+        transform: translateY(-1px);
+      }
+
+      &.is-move {
+        cursor: move;
+        border-color: rgba(64, 158, 255, 0.42);
+        background: rgba(236, 245, 255, 0.68);
+        color: var(--el-color-primary);
+      }
+
+      &.is-move:hover,
+      &.is-move.is-active {
+        border-color: var(--el-color-primary);
+        background: rgba(236, 245, 255, 0.9);
+        box-shadow:
+          inset 0 0 0 1px rgba(64, 158, 255, 0.28),
+          0 6px 18px rgba(64, 158, 255, 0.18);
+      }
+
+      &.is-copy {
+        cursor: copy;
+        border-color: rgba(103, 194, 58, 0.42);
+        background: rgba(240, 249, 235, 0.68);
+        color: var(--el-color-success);
+      }
+
+      &.is-copy:hover,
+      &.is-copy.is-active {
+        border-color: var(--el-color-success);
+        background: rgba(240, 249, 235, 0.9);
+        box-shadow:
+          inset 0 0 0 1px rgba(103, 194, 58, 0.28),
+          0 6px 18px rgba(103, 194, 58, 0.18);
+      }
+
+      &.is-disabled {
+        cursor: not-allowed;
+        color: var(--el-text-color-placeholder);
+        background: var(--el-fill-color-lighter);
+        border-color: var(--el-border-color-lighter);
+        box-shadow: none;
+      }
+
+      &.is-disabled:hover {
+        transform: none;
+        color: var(--el-text-color-placeholder);
+        background: var(--el-fill-color-lighter);
+        border-color: var(--el-border-color-lighter);
+      }
+    }
   }
 
   .schedule-placeholder {
@@ -1446,30 +2173,6 @@ defineExpose({
     display: inline-block;
     vertical-align: middle;
     pointer-events: none;
-  }
-
-  .schedule-person {
-    display: flex;
-    align-items: center;
-    padding: 4px 6px;
-    margin-bottom: 4px;
-    background: var(--el-fill-color-blank);
-    border-radius: 4px;
-    border: 1px solid #e4e7ed;
-    cursor: move;
-  }
-
-  .person-color-small {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    margin-right: 6px;
-  }
-
-  .person-name-small {
-    flex: 1;
-    font-size: 12px;
-    color: var(--el-text-color-regular);
   }
 
   .schedule-detail {
@@ -1503,8 +2206,135 @@ defineExpose({
   }
 
   :deep(.el-table) {
+    .el-table__row.schedule-row-holiday {
+      --schedule-row-bg: color-mix(
+        in srgb,
+        var(--schedule-holiday-color) 14%,
+        var(--el-bg-color) 86%
+      );
+      --schedule-row-hover-bg: color-mix(
+        in srgb,
+        var(--schedule-holiday-color) 20%,
+        var(--el-bg-color) 80%
+      );
+    }
+
+    .el-table__row.schedule-row-transfer-workday {
+      --schedule-row-bg: color-mix(
+        in srgb,
+        var(--schedule-transfer-workday-color) 6%,
+        var(--el-bg-color) 94%
+      );
+      --schedule-row-hover-bg: color-mix(
+        in srgb,
+        var(--schedule-transfer-workday-color) 11%,
+        var(--el-bg-color) 89%
+      );
+    }
+
+    .el-table__row.schedule-row-weekend {
+      --schedule-row-bg: color-mix(
+        in srgb,
+        var(--schedule-weekend-color) 8%,
+        var(--el-bg-color) 92%
+      );
+      --schedule-row-hover-bg: color-mix(
+        in srgb,
+        var(--schedule-weekend-color) 13%,
+        var(--el-bg-color) 87%
+      );
+    }
+
+    .el-table__row.schedule-row-holiday > .el-table__cell,
+    .el-table__row.schedule-row-transfer-workday > .el-table__cell,
+    .el-table__row.schedule-row-weekend > .el-table__cell {
+      background: var(--schedule-row-bg);
+    }
+
+    .el-table__row.schedule-row-holiday:hover > .el-table__cell,
+    .el-table__row.schedule-row-transfer-workday:hover > .el-table__cell,
+    .el-table__row.schedule-row-weekend:hover > .el-table__cell,
+    .el-table__row.schedule-row-holiday.hover-row > .el-table__cell,
+    .el-table__row.schedule-row-transfer-workday.hover-row > .el-table__cell,
+    .el-table__row.schedule-row-weekend.hover-row > .el-table__cell {
+      background: var(--schedule-row-hover-bg);
+    }
+
     .el-table__row .el-table__cell {
       position: relative;
+    }
+
+    .el-table__body .el-table__cell > .cell {
+      min-height: 34px;
+      overflow: visible;
+    }
+  }
+
+  :global(html.dark) & {
+    .schedule-cell {
+      &.is-transfer-workday-date {
+        border-color: rgba(245, 108, 108, 0.5);
+        background: color-mix(
+          in srgb,
+          var(--schedule-transfer-workday-color) 18%,
+          var(--el-bg-color) 82%
+        );
+      }
+
+      &.is-weekend-date {
+        border-color: rgba(20, 184, 166, 0.56);
+        background: color-mix(
+          in srgb,
+          var(--schedule-weekend-color) 20%,
+          var(--el-bg-color) 80%
+        );
+      }
+
+      &.is-transfer-workday-date:hover {
+        border-color: rgba(245, 108, 108, 0.68);
+        background: color-mix(
+          in srgb,
+          var(--schedule-transfer-workday-color) 26%,
+          var(--el-bg-color) 74%
+        );
+      }
+
+      &.is-weekend-date:hover {
+        border-color: rgba(20, 184, 166, 0.74);
+        background: color-mix(
+          in srgb,
+          var(--schedule-weekend-color) 30%,
+          var(--el-bg-color) 70%
+        );
+      }
+    }
+
+    :deep(.el-table) {
+      .el-table__row.schedule-row-transfer-workday {
+        --schedule-row-bg: color-mix(
+          in srgb,
+          var(--schedule-transfer-workday-color) 18%,
+          var(--el-bg-color) 82%
+        );
+        --schedule-row-hover-bg: color-mix(
+          in srgb,
+          var(--schedule-transfer-workday-color) 26%,
+          var(--el-bg-color) 74%
+        );
+      }
+
+      .el-table__row.schedule-row-weekend {
+        --schedule-row-bg: color-mix(
+          in srgb,
+          var(--schedule-weekend-color) 20%,
+          var(--el-bg-color) 80%
+        );
+        --schedule-row-hover-bg: color-mix(
+          in srgb,
+          var(--schedule-weekend-color) 30%,
+          var(--el-bg-color) 70%
+        );
+      }
     }
   }
 }

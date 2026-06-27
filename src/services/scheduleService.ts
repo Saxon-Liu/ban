@@ -389,9 +389,9 @@ export class ScheduleService {
     }
 
     const personIds = [...new Set(sourceSchedules.map(s => s.personId))]
-    for (const personId of personIds) {
-      await assertActiveSchedulingEntities(personId, targetShiftId)
-    }
+    await Promise.all(
+      personIds.map((personId) => assertActiveSchedulingEntities(personId, targetShiftId))
+    )
 
     const now = getCurrentDateTime()
     const [sourceDateSchedules, targetDateSchedules] = await Promise.all([
@@ -411,9 +411,18 @@ export class ScheduleService {
       0
     )
 
-    // 业务约束：同一人员同一天只能有一条排班，跨班次复制/移动也必须按日期检测冲突。
-    const existingByTargetDate = new Map<string, Schedule>()
-    targetDateSchedules.forEach((schedule) => existingByTargetDate.set(schedule.personId, schedule))
+    // 业务约束：同一人员同一天只能有一条排班。
+    // 旧版本数据库可能存在同人同日脏数据，因此这里按人员保留整组记录，
+    // 同一天移动时只允许复用“当前来源记录”本身。
+    const targetSchedulesByPersonId = new Map<string, Schedule[]>()
+    for (const schedule of effectiveTargetDateSchedules) {
+      const personSchedules = targetSchedulesByPersonId.get(schedule.personId)
+      if (personSchedules) {
+        personSchedules.push(schedule)
+      } else {
+        targetSchedulesByPersonId.set(schedule.personId, [schedule])
+      }
+    }
     const targetPersonIds = new Set(currentTargetSchedules.map((schedule) => schedule.personId))
 
     const createdSchedules: Schedule[] = []
@@ -426,14 +435,12 @@ export class ScheduleService {
     const pendingDeletes: string[] = []
 
     for (const source of currentSourceSchedules) {
-      const existingTargetSchedule = existingByTargetDate.get(source.personId)
-      // 同一天移动到另一个班次时可以直接复用原记录，不应被自己的记录判定为冲突。
-      const canReuseSameDaySchedule =
-        mode === 'move' &&
-        source.date === targetDate &&
-        existingTargetSchedule?.id === source.id
+      const existingTargetSchedules = targetSchedulesByPersonId.get(source.personId) || []
+      const hasTargetDateConflict = existingTargetSchedules.some(
+        (schedule) => schedule.id !== source.id
+      )
 
-      if (existingTargetSchedule && !canReuseSameDaySchedule) {
+      if (hasTargetDateConflict) {
         conflictCount++
         skippedPersonIds.push(source.personId)
         continue
@@ -458,7 +465,10 @@ export class ScheduleService {
         pendingUpdates.push(updatedSchedule)
         updatedSchedules.push(updatedSchedule)
         targetPersonIds.add(source.personId)
-        existingByTargetDate.set(source.personId, updatedSchedule)
+        targetSchedulesByPersonId.set(source.personId, [
+          ...existingTargetSchedules.filter((schedule) => schedule.id !== source.id),
+          updatedSchedule,
+        ])
         continue
       }
 
@@ -475,7 +485,10 @@ export class ScheduleService {
       pendingAdds.push(createdSchedule)
       createdSchedules.push(createdSchedule)
       targetPersonIds.add(source.personId)
-      existingByTargetDate.set(source.personId, createdSchedule)
+      targetSchedulesByPersonId.set(source.personId, [
+        ...existingTargetSchedules,
+        createdSchedule,
+      ])
 
       if (mode === 'move') {
         pendingDeletes.push(source.id)
