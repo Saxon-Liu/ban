@@ -236,10 +236,6 @@
           </div>
         </section>
       </div>
-
-      <!-- <footer class="config-footer-note">
-        所有配置操作均会记录日志，请谨慎操作重要数据。
-      </footer> -->
     </el-card>
 
     <input
@@ -1207,15 +1203,6 @@ const handleHolidayFileChange = async (event: Event) => {
     .block-copy h3 {
       color: var(--el-color-danger);
     }
-  }
-
-  .config-footer-note {
-    padding: 14px 16px;
-    border: 1px solid var(--el-border-color-light);
-    border-radius: 12px;
-    background: var(--footer-note-bg);
-    font-size: 14px;
-    color: var(--el-text-color-secondary);
   }
 
   .muted-text {

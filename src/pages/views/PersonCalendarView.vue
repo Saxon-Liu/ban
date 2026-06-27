@@ -133,10 +133,6 @@
                           {{ getHolidayEntry(data.day)?.label }}
                         </span>
                       </el-tooltip>
-                      <!-- <span
-                        class="weekday"
-                        :class="{ 'is-weekend': isWeekend(data.day) }"
-                      >{{ getWeekdayLabel(data.day) }}</span> -->
                     </div>
                     <div class="date-content">
                       <template v-if="getSchedule(person.id, data.day)">
@@ -164,17 +160,6 @@
                         <span class="placeholder">未排班</span>
                       </template>
                     </div>
-                    <!-- <div class="cell-actions">
-                      <el-button
-                        text
-                        type="primary"
-                        size="small"
-                        @click.stop="
-                          handleCellClick(person.id, data.day, $event)
-                        "
-                        >点击进行排班</el-button
-                      >
-                    </div> -->
                   </div>
                 </template>
               </el-calendar>
@@ -1058,10 +1043,6 @@ defineExpose({
   &:hover {
     background-color: var(--el-color-primary-light-9);
     border-color: var(--el-color-primary);
-
-    .cell-actions {
-      opacity: 1;
-    }
   }
 
   &.is-outside-month {
@@ -1132,16 +1113,6 @@ defineExpose({
     }
   }
 
-  // .weekday {
-  //   font-size: 12px;
-  //   // color: var(--el-text-color-secondary);
-  //   font-weight: 500;
-
-  //   &.is-weekend {
-  //     color: var(--el-color-warning);
-  //     font-weight: 600;
-  //   }
-  // }
 }
 
 .date-content {
@@ -1174,20 +1145,6 @@ defineExpose({
     font-size: 12px;
     color: var(--el-text-color-secondary);
     opacity: 0.6;
-  }
-}
-
-.cell-actions {
-  opacity: 0;
-  transition: opacity 0.2s ease;
-  display: flex;
-  justify-content: center;
-  padding-top: 4px;
-
-  .el-button {
-    font-size: 12px;
-    padding: 4px 8px;
-    height: auto;
   }
 }
 

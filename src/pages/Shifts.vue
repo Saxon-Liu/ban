@@ -89,10 +89,6 @@
         </el-form-item>
         <el-form-item label="颜色" prop="color">
           <div class="color-picker-container">
-            <!-- <div
-              class="color-preview"
-              :style="{ backgroundColor: shiftForm.color }"
-            ></div> -->
             <el-color-picker v-model="shiftForm.color" />
           </div>
         </el-form-item>
@@ -171,10 +167,6 @@ const loadShifts = async () => {
   try {
     const all = await repositories.shifts.getAll();
     shifts.value = all;
-    console.log("班次加载完成:", {
-      总班次: all.length,
-      班次列表: all.map((s) => s.name),
-    });
     initSortable();
   } catch (error) {
     console.error("[loadShifts-error]", {
@@ -344,12 +336,11 @@ const handleSubmit = async () => {
       ElMessage.success("编辑成功");
     } else {
       // 新增模式
-      const newShift = await repositories.shifts.create({
+      await repositories.shifts.create({
         name: shiftForm.name,
         color: shiftForm.color,
         isRest: false,
       });
-      console.log("新增班次成功:", newShift);
       ElMessage.success("新增成功");
     }
 
@@ -449,13 +440,6 @@ const isShiftDeleting = (id: string) => deletingShiftMap[id] === true;
     display: flex;
     align-items: center;
     gap: 10px;
-  }
-
-  .color-preview {
-    width: 30px;
-    height: 30px;
-    border-radius: 4px;
-    border: 1px solid #ddd;
   }
 
   .drag-handle {

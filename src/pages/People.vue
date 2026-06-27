@@ -146,11 +146,6 @@
         </el-form-item>
         <el-form-item label="颜色" prop="color">
           <div class="color-picker-container">
-            <!-- <div
-              class="color-preview"
-              :style="{ backgroundColor: personForm.color }"
-            ></div> -->
-            <!-- <el-button @click="selectRandomColor">随机选择</el-button> -->
             <el-color-picker v-model="personForm.color" />
           </div>
         </el-form-item>
@@ -678,7 +673,6 @@ const isPersonDeleting = (id: string) => deletingPersonMap[id] === true;
 <style lang="scss" scoped>
 .people-page {
   height: calc(100% - 2px);
-  /* min-height: 300px; Remove explicit min-height to allow flex shrinking if needed, or keep if desired */
   
   .el-card {
     height: 100%;
@@ -717,13 +711,6 @@ const isPersonDeleting = (id: string) => deletingPersonMap[id] === true;
     display: flex;
     align-items: center;
     gap: 10px;
-  }
-
-  .color-preview {
-    width: 30px;
-    height: 30px;
-    border-radius: 4px;
-    border: 1px solid #ddd;
   }
 
   .over-rest {

@@ -15,9 +15,7 @@ export async function initializeDefaultShifts(): Promise<void> {
   try {
     const db = await dbManager.getDB()
     const count = await db.count('shifts')
-    console.log('班次数据检查:', { 总班次数量: count })
     if (count === 0) {
-      console.log('无班次数据，开始初始化默认班次...')
       const now = getCurrentDateTime()
       const tx = db.transaction('shifts', 'readwrite')
       await Promise.all(
@@ -34,9 +32,6 @@ export async function initializeDefaultShifts(): Promise<void> {
         )
       )
       await tx.done
-      console.log('默认班次初始化完成')
-    } else {
-      console.log('已有班次数据，跳过默认班次初始化')
     }
   } catch (error) {
     console.error('[initializeDefaultShifts-fatal]', {
@@ -56,7 +51,6 @@ export async function initializeDefaultShifts(): Promise<void> {
 export async function initializeSystem(): Promise<void> {
   try {
     await initializeDefaultShifts()
-    console.log('系统初始化完成')
   } catch (error) {
     console.error('系统初始化失败:', error)
     throw error

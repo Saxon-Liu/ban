@@ -162,7 +162,7 @@ export default defineConfig(async ({ mode }) => {
             "vendor-vue": ["vue", "vue-router"],
             "vendor-element-plus": ["element-plus", "@element-plus/icons-vue"],
             "vendor-excel": ["exceljs"],
-            "vendor-utils": ["lodash-es", "dayjs"],
+            "vendor-utils": ["dayjs"],
           },
         },
       },
