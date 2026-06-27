@@ -2,19 +2,30 @@ import electron from 'electron'
 
 const { contextBridge, ipcRenderer } = electron
 const originalConsoleError = console.error.bind(console)
-const originalConsoleInfo = console.info.bind(console)
-const originalConsoleWarn = console.warn.bind(console)
 
-function serializeForLog(value: unknown, seen = new WeakSet<object>()): unknown {
+// 序列化深度与对象键数量上限，避免对 Error.stack 之外的大对象做无界深拷贝
+const MAX_SERIALIZE_DEPTH = 6
+const MAX_OBJECT_KEYS = 50
+const MAX_ARRAY_ITEMS = 50
+const MAX_STRING_LENGTH = 2000
+
+function truncateLogString(value: string) {
+  return value.length > MAX_STRING_LENGTH
+    ? `${value.slice(0, MAX_STRING_LENGTH)}...[truncated ${value.length - MAX_STRING_LENGTH}]`
+    : value
+}
+
+function serializeForLog(value: unknown, depth = 0, seen = new WeakSet<object>()): unknown {
   if (value === null || value === undefined) return value
-  if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
-    return value
+  if (typeof value === 'number' || typeof value === 'boolean') return value
+  if (typeof value === 'string') {
+    return truncateLogString(value)
   }
   if (value instanceof Error) {
     return {
       name: value.name,
-      message: value.message,
-      stack: value.stack,
+      message: truncateLogString(value.message),
+      stack: value.stack ? truncateLogString(value.stack) : undefined,
     }
   }
   if (value instanceof Date) {
@@ -24,16 +35,26 @@ function serializeForLog(value: unknown, seen = new WeakSet<object>()): unknown 
     return `[Function ${value.name || 'anonymous'}]`
   }
   if (typeof value === 'object') {
+    if (depth >= MAX_SERIALIZE_DEPTH) return '[MaxDepth]'
     if (seen.has(value)) return '[Circular]'
     seen.add(value)
 
     if (Array.isArray(value)) {
-      return value.map((item) => serializeForLog(item, seen))
+      const slice = value.slice(0, MAX_ARRAY_ITEMS).map((item) => serializeForLog(item, depth + 1, seen))
+      if (value.length > MAX_ARRAY_ITEMS) {
+        slice.push(`[...${value.length - MAX_ARRAY_ITEMS} more]`)
+      }
+      return slice
     }
 
+    const keys = Object.keys(value).slice(0, MAX_OBJECT_KEYS)
     const plainObject: Record<string, unknown> = {}
-    for (const key of Object.keys(value)) {
-      plainObject[key] = serializeForLog((value as Record<string, unknown>)[key], seen)
+    for (const key of keys) {
+      plainObject[key] = serializeForLog((value as Record<string, unknown>)[key], depth + 1, seen)
+    }
+    const totalKeys = Object.keys(value).length
+    if (totalKeys > MAX_OBJECT_KEYS) {
+      plainObject.__truncatedKeys = totalKeys - MAX_OBJECT_KEYS
     }
     return plainObject
   }
@@ -41,13 +62,51 @@ function serializeForLog(value: unknown, seen = new WeakSet<object>()): unknown 
   return String(value)
 }
 
+function safeSerializeForLog(value: unknown) {
+  try {
+    return serializeForLog(value)
+  } catch (error) {
+    return {
+      serializationError: error instanceof Error ? error.message : String(error),
+    }
+  }
+}
+
+// Token-bucket 限流：每秒最多上报 30 条，避免高频路径（如拖拽）打日志风暴
+const LOG_RATE_PER_SECOND = 30
+let logTokens = LOG_RATE_PER_SECOND
+let droppedLogs = 0
+setInterval(() => {
+  if (droppedLogs > 0) {
+    void ipcRenderer.invoke('logRenderer', {
+      level: 'warn',
+      source: 'preload-rate-limit',
+      message: '渲染端日志被限流丢弃',
+      data: { droppedInLastSecond: droppedLogs },
+      url: window.location.href,
+      userAgent: navigator.userAgent,
+      time: new Date().toISOString(),
+    }).catch(() => {
+      // 限流摘要本身失败时不再处理，避免回路
+    })
+    droppedLogs = 0
+  }
+  logTokens = LOG_RATE_PER_SECOND
+}, 1000)
+
 function sendRendererLog(level: 'info' | 'warn' | 'error', source: string, message: string, data?: unknown) {
+  if (logTokens <= 0) {
+    droppedLogs += 1
+    return
+  }
+  logTokens -= 1
+
   void ipcRenderer
     .invoke('logRenderer', {
       level,
       source,
       message,
-      data: serializeForLog(data),
+      data: safeSerializeForLog(data),
       url: window.location.href,
       userAgent: navigator.userAgent,
       time: new Date().toISOString(),
@@ -61,9 +120,39 @@ function sendRendererError(source: string, message: string, data?: unknown) {
   sendRendererLog('error', source, message, data)
 }
 
+function safeStringifyForConsole(value: unknown) {
+  try {
+    return JSON.stringify(safeSerializeForLog(value))
+  } catch (error) {
+    return JSON.stringify({
+      serializationError: error instanceof Error ? error.message : String(error),
+    })
+  }
+}
+
+function summarizeIpcArg(value: unknown): unknown {
+  if (Array.isArray(value)) {
+    return `[Array length=${value.length}]`
+  }
+  if (value instanceof ArrayBuffer) {
+    return `[ArrayBuffer byteLength=${value.byteLength}]`
+  }
+  if (ArrayBuffer.isView(value)) {
+    return `[${value.constructor.name} byteLength=${value.byteLength}]`
+  }
+  if (typeof value === 'string' && value.length > MAX_STRING_LENGTH) {
+    return `[String length=${value.length}]`
+  }
+  return safeSerializeForLog(value)
+}
+
+function summarizeIpcArgs(args: unknown[]) {
+  return args.map((arg) => summarizeIpcArg(arg))
+}
+
 const logger = {
   info: (message: string, data?: unknown) => {
-    console.log(`[${new Date().toISOString()}] [INFO] ${message}`, data ? JSON.stringify(data) : '')
+    console.log(`[${new Date().toISOString()}] [INFO] ${message}`, data ? safeStringifyForConsole(data) : '')
   },
   error: (message: string, error?: unknown) => {
     originalConsoleError(`[${new Date().toISOString()}] [ERROR] ${message}`, error)
@@ -85,14 +174,14 @@ function withErrorHandling<TArgs extends unknown[], TResult>(
 ) {
   return async (...args: TArgs) => {
     try {
-      logger.info(`调用IPC通道: ${channel}`, args)
+      logger.info(`调用IPC通道: ${channel}`, summarizeIpcArgs(args))
       const result = await handler(...args)
       logger.info(`IPC通道调用成功: ${channel}`)
       return result
     } catch (error) {
       logger.error(`IPC通道调用失败: ${channel}`, {
         time: new Date().toISOString(),
-        args,
+        args: summarizeIpcArgs(args),
         message: (error as Error)?.message,
         stack: (error as Error)?.stack,
       })
@@ -171,19 +260,12 @@ window.addEventListener('unhandledrejection', (event) => {
   sendRendererError('unhandledrejection', '未处理的Promise拒绝', details)
 })
 
+// 只劫持 console.error：info/warn 在拖拽等高频路径会被业务代码大量调用，
+// 走 IPC 转发会让渲染主线程因同步序列化而卡死。
+// info/warn 仍保留原生输出，可通过 DevTools 查看；如需主进程持久化，业务代码可显式调用 electronAPI 上报。
 console.error = (...args: unknown[]) => {
   originalConsoleError(...args)
   sendRendererError('console-error', String(args[0] || 'console.error'), args)
-}
-
-console.info = (...args: unknown[]) => {
-  originalConsoleInfo(...args)
-  sendRendererLog('info', 'console-info', String(args[0] || 'console.info'), args)
-}
-
-console.warn = (...args: unknown[]) => {
-  originalConsoleWarn(...args)
-  sendRendererLog('warn', 'console-warn', String(args[0] || 'console.warn'), args)
 }
 
 logger.info('预加载脚本加载完成')

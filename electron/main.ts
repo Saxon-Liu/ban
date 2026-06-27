@@ -4,16 +4,22 @@ import fsp from 'node:fs/promises'
 import os from 'node:os'
 import path from 'node:path'
 import electron from 'electron'
+import type { WebContents } from 'electron'
 import { HOLIDAY_REMOTE_CONNECT_SOURCES } from '../shared/holidayRemote'
 import { appLogger, errorLogger } from './logger'
 
-const { app, BrowserWindow, dialog, ipcMain, Menu, session } = electron
+const { app, BrowserWindow, crashReporter, dialog, ipcMain, Menu, session } = electron
 
 const APP_NAME = '班'
 const APP_ID = 'com.paiban.electron'
 const AUTH_STORAGE_KEY = 'auth-token'
 const AUTH_EXPIRY_KEY = 'auth-expiry'
 const AUTH_SESSION_VERSION_KEY = 'auth-session-version'
+const MAX_RENDERER_LOG_FIELD_LENGTH = 4000
+const MAX_CRASH_DUMP_FILES = 20
+
+let crashReporterStarted = false
+let crashReporterStartError: string | null = null
 
 if (app.getName() !== APP_NAME) {
   app.setName(APP_NAME)
@@ -21,6 +27,67 @@ if (app.getName() !== APP_NAME) {
 if (process.platform === 'win32') {
   app.setAppUserModelId(APP_ID)
 }
+
+function getErrorSummary(error: unknown) {
+  return error instanceof Error
+    ? { message: error.message, stack: error.stack, name: error.name }
+    : { message: String(error) }
+}
+
+function getCrashDumpsPath() {
+  try {
+    return app.getPath('crashDumps')
+  } catch {
+    return null
+  }
+}
+
+function getCrashReporterDiagnostics() {
+  let uploadToServer: boolean | undefined
+  let parameters: Record<string, string> | undefined
+  let lastUploadedReport: Electron.CrashReport | null | undefined
+
+  if (crashReporterStarted) {
+    try {
+      uploadToServer = crashReporter.getUploadToServer()
+      parameters = crashReporter.getParameters()
+      lastUploadedReport = crashReporter.getLastCrashReport()
+    } catch (error) {
+      crashReporterStartError = crashReporterStartError || getErrorSummary(error).message
+    }
+  }
+
+  return {
+    started: crashReporterStarted,
+    startError: crashReporterStartError,
+    uploadToServer,
+    dumpsPath: getCrashDumpsPath(),
+    parameters,
+    lastUploadedReport,
+  }
+}
+
+function initializeCrashReporter() {
+  try {
+    crashReporter.start({
+      productName: APP_NAME,
+      uploadToServer: false,
+      ignoreSystemCrashHandler: false,
+      compress: true,
+      globalExtra: {
+        appName: APP_NAME,
+        appVersion: app.getVersion(),
+        electron: process.versions.electron || '',
+        platform: process.platform,
+      },
+    })
+    crashReporterStarted = true
+  } catch (error) {
+    crashReporterStartError = getErrorSummary(error).message
+  }
+}
+
+initializeCrashReporter()
 
 class AppManager {
   private mainWindow: InstanceType<typeof BrowserWindow> | null = null
@@ -152,6 +219,7 @@ class AppManager {
               sandboxed: metric.sandboxed,
             }))
           : [],
+      crashReporter: getCrashReporterDiagnostics(),
     }
   }
 
@@ -162,6 +230,136 @@ class AppManager {
       diagnostics: this.collectDiagnostics(reason),
       ...extra,
     })
+  }
+
+  private getWebContentsState(webContents: WebContents) {
+    try {
+      return {
+        id: webContents.id,
+        url: webContents.getURL(),
+        isDestroyed: webContents.isDestroyed(),
+        isLoading: webContents.isLoading(),
+        isLoadingMainFrame: webContents.isLoadingMainFrame(),
+        isWaitingForResponse: webContents.isWaitingForResponse(),
+      }
+    } catch (error) {
+      return {
+        error: getErrorSummary(error),
+      }
+    }
+  }
+
+  private setupWebContentsDiagnostics(targetWindow: InstanceType<typeof BrowserWindow>) {
+    const { webContents } = targetWindow
+
+    targetWindow.on('unresponsive', () => {
+      this.logDiagnostics('error', '主窗口无响应', 'browser-window-unresponsive', {
+        webContents: this.getWebContentsState(webContents),
+      })
+    })
+
+    targetWindow.on('responsive', () => {
+      this.logDiagnostics('info', '主窗口恢复响应', 'browser-window-responsive', {
+        webContents: this.getWebContentsState(webContents),
+      })
+    })
+
+    webContents.on('render-process-gone', (_event, details) => {
+      this.logDiagnostics('error', '渲染进程终止', 'render-process-gone', {
+        details,
+        webContents: this.getWebContentsState(webContents),
+      })
+    })
+
+    webContents.on('unresponsive', () => {
+      this.logDiagnostics('error', '渲染进程无响应', 'webcontents-unresponsive', {
+        webContents: this.getWebContentsState(webContents),
+      })
+    })
+
+    webContents.on('responsive', () => {
+      this.logDiagnostics('info', '渲染进程恢复响应', 'webcontents-responsive', {
+        webContents: this.getWebContentsState(webContents),
+      })
+    })
+
+    webContents.on('preload-error', (_event, preloadPath, error) => {
+      this.logDiagnostics('error', '预加载脚本异常', 'preload-error', {
+        preloadPath,
+        error: getErrorSummary(error),
+        webContents: this.getWebContentsState(webContents),
+      })
+    })
+
+    webContents.on(
+      'did-fail-load',
+      (
+        _event,
+        errorCode,
+        errorDescription,
+        validatedURL,
+        isMainFrame,
+        frameProcessId,
+        frameRoutingId
+      ) => {
+        this.logDiagnostics('error', '页面加载失败', 'did-fail-load', {
+          errorCode,
+          errorDescription,
+          validatedURL,
+          isMainFrame,
+          frameProcessId,
+          frameRoutingId,
+          webContents: this.getWebContentsState(webContents),
+        })
+      }
+    )
+
+    webContents.on(
+      'did-fail-provisional-load',
+      (
+        _event,
+        errorCode,
+        errorDescription,
+        validatedURL,
+        isMainFrame,
+        frameProcessId,
+        frameRoutingId
+      ) => {
+        this.logDiagnostics('error', '页面预加载失败', 'did-fail-provisional-load', {
+          errorCode,
+          errorDescription,
+          validatedURL,
+          isMainFrame,
+          frameProcessId,
+          frameRoutingId,
+          webContents: this.getWebContentsState(webContents),
+        })
+      }
+    )
+  }
+
+  private truncateRendererLogField(value: unknown, fallback = '') {
+    if (typeof value !== 'string') return fallback
+    return value.length > MAX_RENDERER_LOG_FIELD_LENGTH
+      ? `${value.slice(0, MAX_RENDERER_LOG_FIELD_LENGTH)}...[truncated ${value.length - MAX_RENDERER_LOG_FIELD_LENGTH}]`
+      : value
+  }
+
+  private normalizeRendererLogPayload(payload: unknown) {
+    const source = payload && typeof payload === 'object'
+      ? (payload as Record<string, unknown>)
+      : {}
+    const level = source.level === 'info' || source.level === 'warn' ? source.level : 'error'
+
+    return {
+      level,
+      source: this.truncateRendererLogField(source.source, 'renderer'),
+      message: this.truncateRendererLogField(source.message, '渲染进程日志'),
+      data: source.data ?? null,
+      url: this.truncateRendererLogField(source.url),
+      userAgent: this.truncateRendererLogField(source.userAgent),
+      time: this.truncateRendererLogField(source.time, new Date().toISOString()),
+    }
   }
 
   private async createWindow() {
@@ -186,11 +384,7 @@ class AppManager {
       this.mainWindow?.show()
     })
 
-    this.mainWindow.on('unresponsive', () => {
-      this.logDiagnostics('error', '主窗口无响应', 'browser-window-unresponsive', {
-        url: this.mainWindow?.webContents.getURL(),
-      })
-    })
+    this.setupWebContentsDiagnostics(this.mainWindow)
 
     this.mainWindow.on('close', (event) => {
       if (this.isClearingAuthSessionOnClose) {
@@ -215,55 +409,6 @@ class AppManager {
     } else {
       await this.mainWindow.loadFile(rendererEntry.value)
     }
-
-    ;(this.mainWindow.webContents as any).on('crashed', (_event: unknown, killed: boolean) => {
-      this.logDiagnostics('error', '渲染进程崩溃', 'webcontents-crashed', { killed })
-    })
-
-    ;(this.mainWindow.webContents as any).on(
-      'render-process-gone',
-      (_event: unknown, details: unknown) => {
-      this.logDiagnostics('error', '渲染进程终止', 'render-process-gone', { details })
-      }
-    )
-
-    this.mainWindow.webContents.on('unresponsive', () => {
-      this.logDiagnostics('error', '渲染进程无响应', 'webcontents-unresponsive', {
-        url: this.mainWindow?.webContents.getURL(),
-      })
-    })
-
-    ;(this.mainWindow.webContents as any).on(
-      'preload-error',
-      (_event: unknown, preloadPath: string, error: Error) => {
-      this.logDiagnostics('error', '预加载脚本异常', 'preload-error', {
-        preloadPath,
-        error: {
-          message: error?.message,
-          stack: error?.stack,
-          name: error?.name,
-        },
-      })
-      }
-    )
-
-    ;(this.mainWindow.webContents as any).on(
-      'did-fail-load',
-      (
-        _event: unknown,
-        errorCode: number,
-        errorDescription: string,
-        validatedURL: string,
-        isMainFrame: boolean
-      ) => {
-        this.logDiagnostics('error', '页面加载失败', 'did-fail-load', {
-          errorCode,
-          errorDescription,
-          validatedURL,
-          isMainFrame,
-        })
-      }
-    )
   }
 
   private async clearAuthSessionAndCloseWindow() {
@@ -297,17 +442,86 @@ class AppManager {
     }
   }
 
+  private async collectCrashDumpFiles() {
+    const root = getCrashDumpsPath()
+    if (!root) {
+      return { root, files: [], total: 0, truncated: false }
+    }
+
+    const files: Array<{
+      relativePath: string
+      size: number
+      mtime: string
+    }> = []
+    const pendingDirs = [{ relativePath: '', depth: 0 }]
+
+    try {
+      while (pendingDirs.length > 0) {
+        const current = pendingDirs.pop()!
+        const currentPath = path.join(root, current.relativePath)
+        const entries = await fsp.readdir(currentPath, { withFileTypes: true })
+
+        for (const entry of entries) {
+          const relativePath = path.join(current.relativePath, entry.name)
+          const entryPath = path.join(root, relativePath)
+
+          if (entry.isDirectory()) {
+            if (current.depth < 3) {
+              pendingDirs.push({ relativePath, depth: current.depth + 1 })
+            }
+            continue
+          }
+
+          if (!entry.isFile()) continue
+          const lowerName = entry.name.toLowerCase()
+          if (
+            !lowerName.endsWith('.dmp') &&
+            !lowerName.endsWith('.dump') &&
+            !lowerName.endsWith('.json') &&
+            !lowerName.endsWith('.txt')
+          ) {
+            continue
+          }
+
+          const stat = await fsp.stat(entryPath)
+          files.push({
+            relativePath,
+            size: stat.size,
+            mtime: stat.mtime.toISOString(),
+          })
+        }
+      }
+    } catch (error) {
+      return {
+        root,
+        files,
+        total: files.length,
+        truncated: false,
+        error: getErrorSummary(error),
+      }
+    }
+
+    files.sort((a, b) => Date.parse(b.mtime) - Date.parse(a.mtime))
+    return {
+      root,
+      files: files.slice(0, MAX_CRASH_DUMP_FILES),
+      total: files.length,
+      truncated: files.length > MAX_CRASH_DUMP_FILES,
+    }
+  }
+
   private setupIPC() {
     ipcMain.handle('getAppContext', async () => this.appContext)
     ipcMain.handle('getVersion', async () => app.getVersion())
     ipcMain.handle('logRenderer', async (_event, payload) => {
-      const level = payload?.level === 'info' || payload?.level === 'warn' ? payload.level : 'error'
+      const normalizedPayload = this.normalizeRendererLogPayload(payload)
+      const { level } = normalizedPayload
       if (level === 'info') {
-        appLogger.info('渲染进程日志', payload)
+        appLogger.info('渲染进程日志', normalizedPayload)
       } else if (level === 'warn') {
-        appLogger.warn('渲染进程日志', payload)
+        appLogger.warn('渲染进程日志', normalizedPayload)
       } else {
-        errorLogger.error('渲染进程日志', payload)
+        errorLogger.error('渲染进程日志', normalizedPayload)
       }
       return { success: true }
     })
@@ -353,6 +567,19 @@ class AppManager {
         writeStream.write(await fsp.readFile(file.path, 'utf8'))
         writeStream.write('\n\n')
       }
+
+      writeStream.write('===== crash-diagnostics.json =====\n')
+      writeStream.write(
+        JSON.stringify(
+          {
+            crashReporter: getCrashReporterDiagnostics(),
+            crashDumps: await this.collectCrashDumpFiles(),
+          },
+          null,
+          2
+        )
+      )
+      writeStream.write('\n\n')
 
       await new Promise<void>((resolve, reject) => {
         writeStream.end(() => resolve())
@@ -503,6 +730,7 @@ class AppManager {
     appLogger.info('应用初始化开始')
     await app.whenReady()
     appLogger.info('应用准备就绪', { ms: Math.round(performance.now() - start) })
+    appLogger.info('崩溃采集初始化状态', getCrashReporterDiagnostics())
 
     this.setupIPC()
     this.setupSecurity()
@@ -523,22 +751,45 @@ class AppManager {
 }
 
 let appManager: AppManager | null = null
+let fatalExitPending = false
+
+async function flushLoggers(timeoutMs = 2000) {
+  await Promise.allSettled([
+    appLogger.flush(timeoutMs),
+    errorLogger.flush(timeoutMs),
+  ])
+}
+
+function exitAfterFatalLog(code: number) {
+  if (fatalExitPending) return
+  fatalExitPending = true
+  process.exitCode = code
+  void flushLoggers().finally(() => {
+    process.exit(code)
+  })
+}
 
 process.on('uncaughtException', (error) => {
   errorLogger.error('主进程未捕获异常', {
-    message: error?.message,
-    stack: error?.stack,
-    name: error?.name,
+    ...getErrorSummary(error),
+    crashReporter: getCrashReporterDiagnostics(),
   })
-  process.exit(1)
+  exitAfterFatalLog(1)
 })
 
 process.on('unhandledRejection', (reason) => {
   errorLogger.error('主进程未处理的Promise拒绝', {
     reason:
       reason instanceof Error
-        ? { message: reason.message, stack: reason.stack, name: reason.name }
+        ? getErrorSummary(reason)
         : reason,
+    crashReporter: getCrashReporterDiagnostics(),
+  })
+})
+
+process.on('warning', (warning) => {
+  appLogger.warn('主进程运行时警告', {
+    warning: getErrorSummary(warning),
   })
 })
 
@@ -563,9 +814,9 @@ if (!gotSingleInstanceLock) {
   appManager = new AppManager()
   void appManager.initialize().catch((error) => {
     errorLogger.error('应用启动失败', {
-      message: error?.message,
-      stack: error?.stack,
+      ...getErrorSummary(error),
+      crashReporter: getCrashReporterDiagnostics(),
     })
-    process.exit(1)
+    exitAfterFatalLog(1)
   })
 }
