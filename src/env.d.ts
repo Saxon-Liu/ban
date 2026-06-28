@@ -11,6 +11,7 @@ declare module '@vue/runtime-core' {
   }
 }
 
+declare global {
 interface ElectronAppContext {
   userName: string
   roles: string[]
@@ -38,6 +39,12 @@ interface Window {
     getAppContext: () => Promise<ElectronAppContext>
     getVersion: () => Promise<string>
     exportLog: () => Promise<ElectronExportLogResult>
+    logRenderer: (payload: {
+      level?: 'info' | 'warn' | 'error'
+      source?: string
+      message?: string
+      data?: unknown
+    }) => Promise<{ success: boolean }>
     saveTextFile: (
       defaultFileName: string,
       content: string,
@@ -52,6 +59,7 @@ interface Window {
     platform: string
     isElectron: true
   }
+}
 }
 
 export {}

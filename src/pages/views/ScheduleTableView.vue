@@ -1,5 +1,5 @@
 <template>
-  <div class="schedule-table-view">
+  <div ref="scheduleTableViewRef" class="schedule-table-view">
     <div class="schedule-container" v-loading="loading">
       <!-- 左侧人员列表 -->
       <div class="people-sidebar">
@@ -438,6 +438,7 @@ const holidayDateMap = ref<Map<string, EffectiveHolidayEntry>>(new Map());
 const peopleSearch = ref("");
 const removingScheduleKeys = ref<Set<string>>(new Set());
 const schedulingBusy = ref(false);
+const scheduleTableViewRef = ref<HTMLElement | null>(null);
 
 type DragOverPayload = {
   cell: HTMLElement;
@@ -474,10 +475,23 @@ type ScheduleCellView = {
   canDrag: boolean;
   asList: ScheduleCellView[];
 };
+type RendererLogAPI = {
+  logRenderer: (payload: {
+    level?: "info" | "warn" | "error";
+    source?: string;
+    message?: string;
+    data?: unknown;
+  }) => Promise<{ success: boolean }>;
+};
 
 let dragOverFrame = 0;
 let pendingDragOver: DragOverPayload | null = null;
 let loadDataRequestId = 0;
+let lastWheelDiagnosticAt = 0;
+let wheelDiagnosticTimer: number | null = null;
+let lastLongTaskDiagnosticAt = 0;
+let longTaskObserver: PerformanceObserver | null = null;
+let staleDragTimer: number | null = null;
 
 const dragState = ref<{
   active: boolean;
@@ -501,6 +515,158 @@ const UNKNOWN_PERSON_TAG_STYLE: PersonTagStyle = {
   color: getAdaptiveTextColor(UNKNOWN_PERSON_COLOR),
 };
 const EMPTY_PERSON_IDS: string[] = [];
+const SCROLL_DIAGNOSTIC_COOLDOWN_MS = 3000;
+const LONG_TASK_DIAGNOSTIC_COOLDOWN_MS = 5000;
+const STALE_DRAG_DIAGNOSTIC_MS = 6000;
+const SLOW_OPERATION_MS = 2000;
+
+const getRendererLogAPI = () =>
+  (window as Window & { electronAPI?: RendererLogAPI }).electronAPI;
+
+const logScheduleDiagnostic = (
+  level: "info" | "warn" | "error",
+  message: string,
+  data: Record<string, unknown> = {}
+) => {
+  const electronAPI = getRendererLogAPI();
+  void electronAPI
+    ?.logRenderer({
+      level,
+      source: "schedule-table",
+      message,
+      data: {
+        ...data,
+        currentMonth: currentMonth.value,
+        loading: loading.value,
+        schedulingBusy: schedulingBusy.value,
+        dragState: { ...dragState.value },
+        time: new Date().toISOString(),
+      },
+    })
+    .catch(() => {
+      // Diagnostic logging must never affect user operations.
+    });
+};
+
+const getScheduleTableContainer = () =>
+  scheduleTableViewRef.value?.querySelector<HTMLElement>(
+    ".schedule-table-container"
+  ) || null;
+
+const getScheduleTableScrollWrap = () =>
+  scheduleTableViewRef.value?.querySelector<HTMLElement>(
+    ".schedule-table-container .el-scrollbar__wrap"
+  ) ||
+  scheduleTableViewRef.value?.querySelector<HTMLElement>(
+    ".schedule-table-container .el-table__body-wrapper"
+  ) ||
+  null;
+
+const handleScheduleWheelDiagnostic = (event: WheelEvent) => {
+  if (Math.abs(event.deltaY) < 1) return;
+  if (wheelDiagnosticTimer !== null) return;
+
+  const now = Date.now();
+  if (now - lastWheelDiagnosticAt < SCROLL_DIAGNOSTIC_COOLDOWN_MS) return;
+
+  const target = event.target instanceof Node ? event.target : null;
+  const container = getScheduleTableContainer();
+  const scrollWrap = getScheduleTableScrollWrap();
+  if (!target || !container || !scrollWrap || !container.contains(target)) return;
+
+  const before = scrollWrap.scrollTop;
+  const maxScrollTop = scrollWrap.scrollHeight - scrollWrap.clientHeight;
+  const canScroll =
+    event.deltaY > 0 ? before < maxScrollTop - 1 : before > 1;
+  if (!canScroll) return;
+
+  wheelDiagnosticTimer = window.setTimeout(() => {
+    wheelDiagnosticTimer = null;
+    const after = scrollWrap.scrollTop;
+    if (Math.abs(after - before) >= 1) return;
+
+    lastWheelDiagnosticAt = Date.now();
+
+    logScheduleDiagnostic("warn", "schedule wheel did not move table scroll", {
+      deltaY: event.deltaY,
+      before,
+      after,
+      maxScrollTop,
+      activeElement:
+        document.activeElement instanceof HTMLElement
+          ? {
+              tagName: document.activeElement.tagName,
+              className: document.activeElement.className,
+            }
+          : null,
+      tableRows: monthDates.value.length,
+      peopleCount: people.value.length,
+      schedulesCount: schedules.value.length,
+    });
+  }, 120);
+};
+
+const setupLongTaskDiagnostics = () => {
+  if (!getRendererLogAPI()) return;
+  if (typeof PerformanceObserver === "undefined") return;
+  try {
+    longTaskObserver = new PerformanceObserver((list) => {
+      const now = Date.now();
+      if (now - lastLongTaskDiagnosticAt < LONG_TASK_DIAGNOSTIC_COOLDOWN_MS) {
+        return;
+      }
+      let longestDuration = 0;
+      let longestStartTime = 0;
+      for (const entry of list.getEntries()) {
+        if (entry.duration < 200) continue;
+        if (entry.duration > longestDuration) {
+          longestDuration = entry.duration;
+          longestStartTime = entry.startTime;
+        }
+      }
+      if (longestDuration > 0) {
+        lastLongTaskDiagnosticAt = now;
+        logScheduleDiagnostic("warn", "renderer long task on schedule page", {
+          duration: Math.round(longestDuration),
+          startTime: Math.round(longestStartTime),
+        });
+      }
+    });
+    longTaskObserver.observe({ entryTypes: ["longtask"] });
+  } catch {
+    longTaskObserver = null;
+  }
+};
+
+const clearStaleDragTimer = () => {
+  if (!staleDragTimer) return;
+  window.clearTimeout(staleDragTimer);
+  staleDragTimer = null;
+};
+
+const scheduleStaleDragDiagnostic = () => {
+  clearStaleDragTimer();
+  if (!dragState.value.active) return;
+  const startedState = { ...dragState.value };
+  staleDragTimer = window.setTimeout(() => {
+    if (!dragState.value.active) return;
+    logScheduleDiagnostic("warn", "schedule drag state stayed active", {
+      startedState,
+      activeForMs: STALE_DRAG_DIAGNOSTIC_MS,
+    });
+  }, STALE_DRAG_DIAGNOSTIC_MS);
+};
+
+watch(
+  () => dragState.value.active,
+  (active) => {
+    if (active) {
+      scheduleStaleDragDiagnostic();
+    } else {
+      clearStaleDragTimer();
+    }
+  }
+);
 
 // 计算属性
 const peopleWithStats = computed(() => {
@@ -739,6 +905,7 @@ const loadData = async () => {
   }
 
   const requestId = ++loadDataRequestId;
+  const startedAt = performance.now();
   loading.value = true;
   try {
     const [
@@ -772,6 +939,16 @@ const loadData = async () => {
   } finally {
     if (requestId === loadDataRequestId) {
       loading.value = false;
+      const duration = performance.now() - startedAt;
+      if (duration > SLOW_OPERATION_MS) {
+        logScheduleDiagnostic("warn", "schedule loadData was slow", {
+          duration: Math.round(duration),
+          month: monthValue,
+          peopleCount: people.value.length,
+          shiftsCount: shifts.value.length,
+          schedulesCount: schedules.value.length,
+        });
+      }
     }
   }
 };
@@ -1229,6 +1406,7 @@ const handleCellDrop = async (
     return;
   }
   schedulingBusy.value = true;
+  const operationStartedAt = performance.now();
 
   // 失败兜底标记：仅在确认数据可能不一致时才异步 reload，
   // 避免 catch 内同步 loadData 拆掉正在拖拽的 DOM。
@@ -1463,8 +1641,15 @@ const handleCellDrop = async (
     needsReloadAfterError = true;
     lastErrorMessage = error instanceof Error ? error.message : "排班失败";
   } finally {
+    const duration = performance.now() - operationStartedAt;
     schedulingBusy.value = false;
     handleDragEnd();
+    if (duration > SLOW_OPERATION_MS) {
+      logScheduleDiagnostic("warn", "schedule drop operation was slow", {
+        duration: Math.round(duration),
+        target: { date, shiftId },
+      });
+    }
     if (needsReloadAfterError) {
       ElMessage.error(lastErrorMessage);
       // 拖拽生命周期结束后再 reload，避免拆掉正在拖拽的 DOM
@@ -1652,6 +1837,14 @@ const removeSchedule = async (
 // 页面加载时初始化数据
 onMounted(() => {
   loadData();
+  if (getRendererLogAPI()) {
+    scheduleTableViewRef.value?.addEventListener(
+      "wheel",
+      handleScheduleWheelDiagnostic,
+      { passive: true, capture: true }
+    );
+    setupLongTaskDiagnostics();
+  }
   window.addEventListener("blur", cancelDanglingDrag);
   window.addEventListener("dragend", cancelDanglingDrag);
   window.addEventListener("dragcancel", cancelDanglingDrag);
@@ -1661,6 +1854,18 @@ onMounted(() => {
 });
 
 onBeforeUnmount(() => {
+  scheduleTableViewRef.value?.removeEventListener(
+    "wheel",
+    handleScheduleWheelDiagnostic,
+    true
+  );
+  longTaskObserver?.disconnect();
+  longTaskObserver = null;
+  if (wheelDiagnosticTimer !== null) {
+    window.clearTimeout(wheelDiagnosticTimer);
+    wheelDiagnosticTimer = null;
+  }
+  clearStaleDragTimer();
   window.removeEventListener("blur", cancelDanglingDrag);
   window.removeEventListener("dragend", cancelDanglingDrag);
   window.removeEventListener("dragcancel", cancelDanglingDrag);

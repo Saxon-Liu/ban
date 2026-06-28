@@ -199,6 +199,24 @@ const electronAPI = {
   getAppContext: withErrorHandling('getAppContext', () => safeInvoke('getAppContext')),
   getVersion: withErrorHandling('getVersion', () => safeInvoke('getVersion')),
   exportLog: withErrorHandling('exportLog', () => safeInvoke('exportLog')),
+  logRenderer: (
+    payload: {
+      level?: 'info' | 'warn' | 'error'
+      source?: string
+      message?: string
+      data?: unknown
+    }
+  ) => {
+    const level =
+      payload.level === 'warn' || payload.level === 'error' ? payload.level : 'info'
+    sendRendererLog(
+      level,
+      payload.source || 'renderer',
+      payload.message || 'renderer diagnostic',
+      payload.data
+    )
+    return Promise.resolve({ success: true })
+  },
   saveTextFile: withErrorHandling(
     'saveTextFile',
     (
